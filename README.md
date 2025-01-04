@@ -22,7 +22,7 @@ This library requires the ESP32 core by Espressif. Ensure you have at least vers
 
 ## Installation
 1. **Manual Installation**:
-   - Download the library from [GitHub](https://github.com/your-username/MyLibrary).
+   - Download the library from [GitHub](https://github.com/rjsachse/RTSPServer).
    - Unzip the downloaded file.
    - Move the `MyLibrary` folder to your Arduino libraries directory (usually `Documents/Arduino/libraries`).
 
