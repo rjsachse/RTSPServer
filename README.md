@@ -24,18 +24,119 @@ This library requires the ESP32 core by Espressif. Ensure you have at least vers
 1. **Manual Installation**:
    - Download the library from [GitHub](https://github.com/rjsachse/ESP32-RTSPServer).
    - Unzip the downloaded file.
-   - Move the `MyLibrary` folder to your Arduino libraries directory (usually `Documents/Arduino/libraries`).
+   - Move the `ESP32-RTSPServer` folder to your Arduino libraries directory (usually `Documents/Arduino/libraries`).
 
 2. **Library Manager**:
    - Open the Arduino IDE.
    - Go to `Sketch` -> `Include Library` -> `Add .ZIP Library...`.
-   - Select the downloaded `MyLibrary.zip` file.
+   - Select the downloaded `ESP32-RTSPServer.zip` file.
 
 ## Usage
 ### Include the Library
-Include the library in your sketch:
+Basic Setup
 ```cpp
+
 #include <RTSPServer.h>
+
+// Include all other libraries and setups eg Camera, Audio
+
+// RTSPServer instance
+RTSPServer rtspServer;
+
+// Creates a new task so the main camera task can continue
+//#define RTSP_VIDEO_NONBLOCK // uncomment if already have a camera task.
+
+// Task handles
+TaskHandle_t videoTaskHandle = NULL; 
+TaskHandle_t audioTaskHandle = NULL; 
+TaskHandle_t subtitlesTaskHandle = NULL;
+
+void getFrameQuality() { 
+  sensor_t * s = esp_camera_sensor_get(); 
+  quality = s->status.quality; 
+  Serial.printf("Camera Quality is: %d\n", quality);
+}
+
+void sendVideo(void* pvParameters) { 
+  while (true) { 
+    // Send frame via RTP
+    if(rtspServer.readyToSendFrame()) { // Must use
+      camera_fb_t* fb = esp_camera_fb_get();
+      rtspServer.sendRTSPFrame(fb->buf, fb->len, quality, fb->width, fb->height);
+      esp_camera_fb_return(fb);
+    }
+    vTaskDelay(pdMS_TO_TICKS(1)); 
+  }
+}
+
+void sendAudio(void* pvParameters) { 
+  while (true) { 
+    size_t bytesRead = 0;
+    if(rtspServer.readyToSendAudio()) {
+      bytesRead = micInput();
+      if (bytesRead) rtspServer.sendRTSPAudio(sampleBuffer, bytesRead);
+      else Serial.println("No audio Recieved");
+    }
+    vTaskDelay(pdMS_TO_TICKS(1)); // Delay for 1 second 
+  }
+}
+
+void sendSubtitles(void* pvParameters) {
+  char data[100];
+  while (true) {
+    if(rtspServer.readyToSendAudio()) {
+      size_t len = snprintf(data, sizeof(data), "FPS: %lu", rtspServer.rtpFps);
+      rtspServer.sendRTSPSubtitles(data, len);
+    }
+  vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay for 1 second has to be 1 second
+  }
+}
+
+void setup() {
+
+  getFrameQuality(); //Retrieve frame quality
+
+  // Create tasks for sending video, and subtitles
+  xTaskCreate(sendVideo, "Video", 3584, NULL, 1, &videoTaskHandle);
+  xTaskCreate(sendAudio, "Audio", 2560, NULL, 1, &audioTaskHandle);
+  xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+
+  // Initialize the RTSP server
+   //Example Setup usage:
+   // Option 1: Start RTSP server with default values
+   if (rtspServer.begin()) { 
+   Serial.println("RTSP server started successfully on port 554"); 
+   } else { 
+   Serial.println("Failed to start RTSP server"); 
+   }
+   
+   // Option 2: Set variables directly and then call begin
+   rtspServer.transport = RTSPServer::VIDEO_AUDIO_SUBTITLES; 
+   rtspServer.sampleRate = 48000; 
+   rtspServer.rtspPort = 8554; 
+   rtspServer.rtpIp = IPAddress(239, 255, 0, 1); 
+   rtspServer.rtpTTL = 64; 
+   rtspServer.rtpVideoPort = 5004; 
+   rtspServer.rtpAudioPort = 5006; 
+   rtspServer.rtpSubtitlesPort = 5008;
+   if (rtspServer.begin()) { 
+   Serial.println("RTSP server started successfully"); 
+   } else { 
+   Serial.println("Failed to start RTSP server"); 
+   }
+   
+   // Option 3: Set variables in the begin call
+   if (rtspServer.begin(RTSPServer::VIDEO_AUDIO_SUBTITLES, 554, sampleRate)) { 
+   Serial.println("RTSP server started successfully"); 
+   } else { 
+   Serial.println("Failed to start RTSP server"); 
+   }
+}
+
+void loop() {
+
+}
+   
 ```
 
 ### Summary:
