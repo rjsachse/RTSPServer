@@ -222,7 +222,7 @@ void sendVideo(void* pvParameters) {
 void sendSubtitles(void* pvParameters) {
   char data[100];
   while (true) {
-    if(rtspServer.readyToSendAudio()) {
+    if(rtspServer.readyToSendSubtitles()) {
       size_t len = snprintf(data, sizeof(data), "FPS: %lu", rtspServer.rtpFps);
       rtspServer.sendRTSPSubtitles(data, len);
     }
