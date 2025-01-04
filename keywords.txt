@@ -1,0 +1,44 @@
+# Syntax Coloring for RTSPServer Library
+# datatype  keyword  description
+
+RTSPServer          KEYWORD1
+RTSP_Session        KEYWORD1
+begin               KEYWORD2
+sendRTSPFrame       KEYWORD2
+sendRTSPAudio       KEYWORD2
+sendRTSPSubtitles   KEYWORD2
+readyToSendFrame    KEYWORD2
+readyToSendAudio    KEYWORD2
+readyToSendSubtitles KEYWORD2
+setupRTP            KEYWORD2
+sendRtpSubtitles    KEYWORD2
+sendRtpAudio        KEYWORD2
+sendRtpFrame        KEYWORD2
+rtpVideoTaskWrapper KEYWORD2
+rtpVideoTask        KEYWORD2
+rtspTaskWrapper     KEYWORD2
+incrementActiveClients KEYWORD2
+decrementActiveClients KEYWORD2
+captureCSeq         KEYWORD2
+generateSessionID   KEYWORD2
+extractSessionID    KEYWORD2
+dateHeader          KEYWORD2
+handleOptions       KEYWORD2
+handleDescribe      KEYWORD2
+handleSetup         KEYWORD2
+handlePlay          KEYWORD2
+handlePause         KEYWORD2
+handleTeardown      KEYWORD2
+handleRTSPRequest   KEYWORD2
+setNonBlocking      KEYWORD2
+rtspTask            KEYWORD2
+prepRTSP            KEYWORD2
+
+TransportType       KEYWORD3
+VIDEO_ONLY          LITERAL1
+AUDIO_ONLY          LITERAL1
+SUBTITLES_ONLY      LITERAL1
+VIDEO_AND_AUDIO     LITERAL1
+VIDEO_AND_SUBTITLES LITERAL1
+AUDIO_AND_SUBTITLES LITERAL1
+VIDEO_AUDIO_SUBTITLES LITERAL1
