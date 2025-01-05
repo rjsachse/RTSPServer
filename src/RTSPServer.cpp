@@ -95,7 +95,7 @@ bool RTSPServer::init(TransportType transport, uint16_t rtspPort, uint32_t sampl
   }
 
   // Dynamically assign ports based on transport type
-  switch (transport) {
+  switch (this->transport) {
     case VIDEO_ONLY:
       this->rtpVideoPort = (port1 != 0) ? port1 : this->rtpVideoPort;
       this->isVideo = true;
@@ -134,8 +134,11 @@ bool RTSPServer::init(TransportType transport, uint16_t rtspPort, uint32_t sampl
       this->isAudio = true;
       this->isSubtitles = true;
       break;
+    case NONE:
+      ESP_LOGE(LOG_TAG, "Transport type can not be NONE");
+      return false;
     default:
-      ESP_LOGE(LOG_TAG, "Invalid transport type for this begin method");
+      ESP_LOGE(LOG_TAG, "Invalid transport type for this init method");
       return false;  // Return false to indicate failure
   }
 
@@ -1081,7 +1084,7 @@ bool RTSPServer::prepRTSP() {
 
   // Bind RTSP socket
   if (bind(this->rtspSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
-    ESP_LOGE(LOG_TAG, "Failed to bind RTSP socket.");
+    ESP_LOGE(LOG_TAG, "Failed to bind RTSP socket: %d", this->rtspSocket);
     return false;
   }
   

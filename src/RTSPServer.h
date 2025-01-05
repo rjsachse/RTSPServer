@@ -38,14 +38,14 @@ public:
    * @brief Enumeration for transport types.
    */
   enum TransportType {
-    NONE,
     VIDEO_ONLY,
     AUDIO_ONLY,
     SUBTITLES_ONLY,
     VIDEO_AND_AUDIO,
     VIDEO_AND_SUBTITLES,
     AUDIO_AND_SUBTITLES,
-    VIDEO_AUDIO_SUBTITLES
+    VIDEO_AUDIO_SUBTITLES,
+    NONE,
   };
 
   RTSPServer();  // Default constructor
