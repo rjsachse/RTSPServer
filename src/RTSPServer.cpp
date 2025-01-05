@@ -8,9 +8,6 @@ const char* RTSPServer::LOG_TAG = "RTSPServer";
  */
 RTSPServer::RTSPServer()
   : rtpFps(0),
-    vQuality(0),
-    vWidth(0),
-    vHeight(0),
     // User can change these settings
     transport(VIDEO_AND_SUBTITLES), // Default transport 
     sampleRate(0),
@@ -26,7 +23,6 @@ RTSPServer::RTSPServer()
     audioRtpSocket(-1),
     subtitlesRtpSocket(-1),
     activeRTSPClients(0),
-    rtpSrtTaskHandle(NULL),
     rtpVideoTaskHandle(NULL),
     rtspTaskHandle(NULL),
     rtspStreamBuffer(NULL),
@@ -35,6 +31,9 @@ RTSPServer::RTSPServer()
     rtpFrameSent(true),
     rtpAudioSent(true),
     rtpSubtitlesSent(true),
+    vQuality(0),
+    vWidth(0),
+    vHeight(0),
     videoSequenceNumber(0),
     videoTimestamp(0),
     audioSequenceNumber(0),
@@ -59,13 +58,7 @@ RTSPServer::RTSPServer()
  */
 RTSPServer::~RTSPServer() {
   // Clean up resources
-  close(this->rtspSocket);
-  close(this->videoRtpSocket);
-  close(this->audioRtpSocket);
-  close(this->subtitlesRtpSocket);
-  if (this->rtspStreamBuffer) {
-    free(this->rtspStreamBuffer);
-  }
+  deinit();
   vSemaphoreDelete(this->clientsMutex);
 }
 
@@ -81,7 +74,7 @@ RTSPServer::~RTSPServer() {
  * @param rtpTTL The TTL value for RTP packets.
  * @return true if initialization is successful, false otherwise.
  */
-bool RTSPServer::begin(TransportType transport, uint16_t rtspPort, uint32_t sampleRate, uint16_t port1, uint16_t port2, uint16_t port3, IPAddress rtpIp, uint8_t rtpTTL) {
+bool RTSPServer::init(TransportType transport, uint16_t rtspPort, uint32_t sampleRate, uint16_t port1, uint16_t port2, uint16_t port3, IPAddress rtpIp, uint8_t rtpTTL) {
   this->transport = transport;
   this->rtspPort = (rtspPort != 0) ? rtspPort : this->rtspPort;
   this->rtpIp = (rtpIp != IPAddress()) ? rtpIp : this->rtpIp;
@@ -149,6 +142,55 @@ bool RTSPServer::begin(TransportType transport, uint16_t rtspPort, uint32_t samp
   // Call prepRTSP and return its result
   return prepRTSP();
 }
+
+/**
+ * @brief Deinitialize the RTSP server. 
+ */
+void RTSPServer::deinit() {
+  // Close Tasks
+  if (this->rtspTaskHandle != NULL) {
+    vTaskDelete(this->rtspTaskHandle);
+    this->rtspTaskHandle = NULL;
+  }
+  if (this->rtpVideoTaskHandle != NULL) {
+    vTaskDelete(this->rtpVideoTaskHandle);
+    this->rtpVideoTaskHandle = NULL;
+  }
+  // Close Sockets
+  if (this->rtspSocket >= 0) {
+    close(this->rtspSocket);
+    this->rtspSocket = -1;
+  }
+  if (this->videoRtpSocket >= 0) {
+    close(this->videoRtpSocket);
+    this->videoRtpSocket = -1;
+  }
+  if (this->audioRtpSocket >= 0) {
+    close(this->audioRtpSocket);
+    this->audioRtpSocket = -1;
+  }
+  if (this->subtitlesRtpSocket >= 0) {
+    close(this->subtitlesRtpSocket);
+    this->subtitlesRtpSocket = -1;
+  }
+  // Free Buffers
+  if (this->rtspStreamBuffer) {
+    free(this->rtspStreamBuffer);
+  }
+
+  ESP_LOGI(LOG_TAG, "RTSP server deinitialized.");
+}
+
+/**
+ * @brief Reinitialize the RTSP server. 
+ * 
+ * @return true if reinitialization was successful, false otherwise.
+ */
+bool RTSPServer::reinit() {
+  deinit();  // Deinitialize the RTSP server
+  return init();  // Reinitialize the RTSP server
+}
+
 /**
  * @brief Sends RTP subtitles.
  * 

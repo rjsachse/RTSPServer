@@ -338,13 +338,13 @@ void setup() {
    *
    * Example usage:
    * // Option 1: Start RTSP server with default values
-   * if (rtspServer.begin()) { 
+   * if (rtspServer.init()) { 
    *   Serial.println("RTSP server started successfully on port 554"); 
    * } else { 
    *   Serial.println("Failed to start RTSP server"); 
    * }
    * 
-   * // Option 2: Set variables directly and then call begin
+   * // Option 2: Set variables directly and then call init
    * rtspServer.transport = RTSPServer::VIDEO_AUDIO_SUBTITLES; 
    * rtspServer.sampleRate = 48000; 
    * rtspServer.rtspPort = 8554; 
@@ -353,28 +353,31 @@ void setup() {
    * rtspServer.rtpVideoPort = 5004; 
    * rtspServer.rtpAudioPort = 5006; 
    * rtspServer.rtpSubtitlesPort = 5008;
-   * if (rtspServer.begin()) { 
+   * if (rtspServer.init()) { 
    *   Serial.println("RTSP server started successfully"); 
    * } else { 
    *   Serial.println("Failed to start RTSP server"); 
    * }
    * 
-   * // Option 3: Set variables in the begin call
-   * if (rtspServer.begin(RTSPServer::VIDEO_AUDIO_SUBTITLES, 554, sampleRate)) { 
+   * // Option 3: Set variables in the init call
+   * if (rtspServer.init(RTSPServer::VIDEO_AUDIO_SUBTITLES, 554, sampleRate)) { 
    *   Serial.println("RTSP server started successfully"); 
    * } else { 
    *   Serial.println("Failed to start RTSP server"); 
    * }
+   *
+   * Also have deinit() and reinit() for either deinitialise or reinitialise the rtsp server
+   * use reinit() if changing settings
    */
 
 #ifdef HAVE_AUDIO
-  if (rtspServer.begin(RTSPServer::VIDEO_AUDIO_SUBTITLES, 554, sampleRate)) {
+  if (rtspServer.init(RTSPServer::VIDEO_AUDIO_SUBTITLES, 554, sampleRate)) {
     Serial.printf("RTSP server started successfully, Connect to rtsp://%s:554/\n", WiFi.localIP().toString().c_str());
   } else { 
     Serial.println("Failed to start RTSP server"); 
   }
 #else
-  if (rtspServer.begin()) { 
+  if (rtspServer.init()) { 
     Serial.printf("RTSP server started successfully using default values, Connect to rtsp://%s:554/\n", WiFi.localIP().toString().c_str());
   } else { 
     Serial.println("Failed to start RTSP server"); 

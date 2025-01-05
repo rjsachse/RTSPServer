@@ -38,6 +38,7 @@ public:
    * @brief Enumeration for transport types.
    */
   enum TransportType {
+    NONE,
     VIDEO_ONLY,
     AUDIO_ONLY,
     SUBTITLES_ONLY,
@@ -62,8 +63,20 @@ public:
    * @param rtpTTL The TTL value for RTP packets.
    * @return true if initialization is successful, false otherwise.
    */
-  bool begin(TransportType transport = VIDEO_ONLY, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255);
+  bool init(TransportType transport = VIDEO_ONLY, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255);
   
+  /**
+   * @brief Deinitialize the RTSP server. 
+   */
+  void deinit();
+
+  /**
+   * @brief Reinitialize the RTSP server. 
+   * 
+   * @return true if reinitialization was successful, false otherwise.
+   */
+  bool reinit();
+
   /**
    * @brief Sends an RTSP frame.
    * @param data Pointer to the frame data.
@@ -107,9 +120,6 @@ public:
   bool readyToSendSubtitles() const;
 
   uint32_t rtpFps;
-  uint8_t vQuality;
-  uint16_t vWidth;
-  uint16_t vHeight;
   TransportType transport;
   uint32_t sampleRate;
   int rtspPort;
@@ -126,7 +136,6 @@ private:
   int subtitlesRtpSocket;
   int activeRTSPClients;
   SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
-  TaskHandle_t rtpSrtTaskHandle;
   TaskHandle_t rtpVideoTaskHandle;
   TaskHandle_t rtspTaskHandle;
   std::map<uint32_t, RTSP_Session> sessions;
@@ -135,6 +144,9 @@ private:
   bool rtpFrameSent;
   bool rtpAudioSent;
   bool rtpSubtitlesSent;
+  uint8_t vQuality;
+  uint16_t vWidth;
+  uint16_t vHeight;
   uint16_t videoSequenceNumber;
   uint32_t videoTimestamp;
   uint32_t videoSSRC;
