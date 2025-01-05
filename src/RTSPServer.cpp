@@ -9,7 +9,7 @@ const char* RTSPServer::LOG_TAG = "RTSPServer";
 RTSPServer::RTSPServer()
   : rtpFps(0),
     // User can change these settings
-    transport(VIDEO_AND_SUBTITLES), // Default transport 
+    transport(VIDEO_ONLY), // Default transport 
     sampleRate(0),
     rtspPort(554),
     rtpIp(IPAddress(239, 255, 0, 1)), // Default RTP IP 
@@ -75,7 +75,7 @@ RTSPServer::~RTSPServer() {
  * @return true if initialization is successful, false otherwise.
  */
 bool RTSPServer::init(TransportType transport, uint16_t rtspPort, uint32_t sampleRate, uint16_t port1, uint16_t port2, uint16_t port3, IPAddress rtpIp, uint8_t rtpTTL) {
-  this->transport = transport;
+  this->transport = (transport != NONE) ? transport : this->transport;
   this->rtspPort = (rtspPort != 0) ? rtspPort : this->rtspPort;
   this->rtpIp = (rtpIp != IPAddress()) ? rtpIp : this->rtpIp;
   this->rtpTTL = (rtpTTL != 255) ? rtpTTL : this->rtpTTL;
