@@ -1,9 +1,3 @@
-name: Update library.properties and Create Release ZIP
-
-on:
-  release:
-    types: [published]
-
 jobs:
   update-and-build:
     runs-on: ubuntu-latest
@@ -23,18 +17,22 @@ jobs:
         sed -i "s/^version=.*/version=$VERSION/" library.properties
 
     - name: Commit changes
+      env:
+        GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add library.properties
         git commit -m "Update version to $VERSION"
-        git push origin HEAD:main
+        git push https://github.com/rjsachse/ESP32-RTSPServer.git HEAD:main
 
     - name: Create ZIP file
       run: zip -r ESP32-RTSPServer.zip . -x "*.git*"
 
     - name: Upload release asset
       uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
         asset_path: ./ESP32-RTSPServer.zip
