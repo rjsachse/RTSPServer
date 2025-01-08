@@ -101,6 +101,8 @@ public:
    */
   void sendRTSPSubtitles(char* data, size_t len);
 
+  void startSubtitlesTimer(esp_timer_cb_t userCallback);
+
   /**
    * @brief Checks if the server is ready to send a frame.
    * @return true if ready, false otherwise.
@@ -164,6 +166,7 @@ private:
   bool isVideo;
   bool isAudio;
   bool isSubtitles;
+  esp_timer_handle_t sendSubtitlesTimer;
 
   /**
    * @brief Sets up RTP streaming.

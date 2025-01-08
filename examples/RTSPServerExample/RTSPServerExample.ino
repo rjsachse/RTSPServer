@@ -230,6 +230,15 @@ void sendSubtitles(void* pvParameters) {
   }
 }
 
+// Timer callback function 
+void onSubtitles(void* arg) { 
+  char data[100];
+  if(rtspServer.readyToSendSubtitles()) {
+    size_t len = snprintf(data, sizeof(data), "FPS: %lu", rtspServer.rtpFps);
+    rtspServer.sendRTSPSubtitles(data, len);
+  }
+}
+
 void printDeviceInfo() {
   // Local function to format size
   auto fmtSize = [](size_t bytes) -> String {
@@ -286,7 +295,6 @@ void printDeviceInfo() {
   Serial.println("");
 }
 
-
 void setup() {
   // Initialize serial communication
   Serial.begin(115200);
@@ -316,7 +324,12 @@ void setup() {
 
   // Create tasks for sending video, and subtitles
   xTaskCreate(sendVideo, "Video", 3584, NULL, 1, &videoTaskHandle);
-  xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+  
+  // You can use a task to send subtitles every second
+  //xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+
+  // Or a callback to send the subtitles with the callback function 
+  rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
 
   // Initialize the RTSP server
   /**

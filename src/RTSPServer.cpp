@@ -49,7 +49,7 @@ RTSPServer::RTSPServer()
     isAudio(false),
     isSubtitles(false)
 {
-  clientsMutex = xSemaphoreCreateMutex(); // Initialize the mutex
+    clientsMutex = xSemaphoreCreateMutex(); // Initialize the mutex 
 }
 
 /**
@@ -466,6 +466,20 @@ bool RTSPServer::readyToSendSubtitles() const {
     send = true;
   }
   return send; 
+}
+
+void RTSPServer::startSubtitlesTimer(esp_timer_cb_t userCallback) { 
+  const esp_timer_create_args_t timerConfig = { 
+    .callback = userCallback, // User-defined callback function 
+    .arg = nullptr, // Optional argument, can be set to NULL
+    .dispatch_method = ESP_TIMER_TASK, // Dispatch method, set to default
+    .name = "periodic_timer" ,
+    .skip_unhandled_events = false // Optional, can be set to false
+    }; 
+    // Create the timer 
+    esp_timer_create(&timerConfig, &sendSubtitlesTimer); 
+    // Start the timer with the specified period (in microseconds) 
+    esp_timer_start_periodic(sendSubtitlesTimer, 1000000); 
 }
 
 /**
