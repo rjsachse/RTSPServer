@@ -653,14 +653,21 @@ void RTSPServer::decrementActiveClients() {
  * @param request The RTSP request.
  * @return The CSeq value.
  */
-int RTSPServer::captureCSeq(String request) {
-  int cseqIndex = request.indexOf("CSeq: ");
-  if (cseqIndex == -1) {
+int RTSPServer::captureCSeq(char* request) {
+  char* cseqStr = strstr(request, "CSeq: ");
+  if (cseqStr == NULL) {
     return -1;
   }
-  int endOfLine = request.indexOf('\n', cseqIndex);
-  String cseqStr = request.substring(cseqIndex + 6, endOfLine);
-  return cseqStr.toInt();
+  cseqStr += 6;
+  char* endOfLine = strchr(cseqStr, '\n');
+  if (endOfLine) {
+    *endOfLine = 0;  // Temporarily null-terminate the CSeq line
+  }
+  int cseq = atoi(cseqStr);
+  if (endOfLine) {
+    *endOfLine = '\n';  // Restore the newline character
+  }
+  return cseq;
 }
 
 /**
@@ -678,15 +685,31 @@ uint32_t RTSPServer::generateSessionID() {
  * @param request The RTSP request.
  * @return The extracted session ID.
  */
-uint32_t RTSPServer::extractSessionID(const String& request) {
-  int sessionIndex = request.indexOf("Session: ");
-  if (sessionIndex == -1) {
+uint32_t RTSPServer::extractSessionID(char* request) {
+  char* sessionStr = strstr(request, "Session: ");
+  if (sessionStr == NULL) {
     return 0;
   }
-  int endOfLine = request.indexOf('\n', sessionIndex);
-  String sessionStr = request.substring(sessionIndex + 9, endOfLine);
-  sessionStr.trim(); // Apply trim() separately
-  return sessionStr.toInt();
+  sessionStr += 9;
+  char* endOfLine = strchr(sessionStr, '\n');
+  if (endOfLine) {
+    *endOfLine = 0; // Temporarily null-terminate the session line
+  }
+
+  // Trim any leading/trailing whitespace
+  while (isspace(*sessionStr)) sessionStr++;
+  char* end = sessionStr + strlen(sessionStr) - 1;
+  while (end > sessionStr && isspace(*end)) end--;
+  *(end + 1) = 0;
+
+  uint32_t sessionID = strtoul(sessionStr, NULL, 10);
+
+  // Restore the newline character
+  if (endOfLine) {
+    *endOfLine = '\n';
+  }
+
+  return sessionID;
 }
 
 /**
@@ -707,14 +730,16 @@ const char* RTSPServer::dateHeader() {
  * @param request The RTSP request.
  * @param session The RTSP session.
  */
-void RTSPServer::handleOptions(const String& request, RTSP_Session& session) {
-  int urlStart = request.indexOf("rtsp://");
-  if (urlStart != -1) {
-    int pathStart = request.indexOf('/', urlStart + 7);
-    int pathEnd = request.indexOf(' ', pathStart);
-    String path = request.substring(pathStart, pathEnd);
+void RTSPServer::handleOptions(char* request, RTSP_Session& session) {
+  char* urlStart = strstr(request, "rtsp://");
+  if (urlStart) {
+    char* pathStart = strchr(urlStart + 7, '/');
+    char* pathEnd = strchr(pathStart, ' ');
+    if (pathStart && pathEnd) {
+      *pathEnd = 0; // Null-terminate the path
+      // Path can be processed here if needed
+    }
   }
-  
   char response[512];
   snprintf(response, sizeof(response), 
            "RTSP/1.0 200 OK\r\n"
@@ -783,25 +808,47 @@ void RTSPServer::handleDescribe(const RTSP_Session& session) {
  * @param request The RTSP request.
  * @param session The RTSP session.
  */
-void RTSPServer::handleSetup(const String& request, RTSP_Session& session) {
-  session.isMulticast = request.indexOf("multicast") != -1;
-  session.isTCP = request.indexOf("RTP/AVP/TCP") != -1;
-  bool setVideo = request.indexOf("video") != -1;
-  bool setAudio = request.indexOf("audio") != -1;
-  bool setSubtitles = request.indexOf("subtitles") != -1;
+void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
+  session.isMulticast = strstr(request, "multicast") != NULL;
+  session.isTCP = strstr(request, "RTP/AVP/TCP") != NULL;
+  bool setVideo = strstr(request, "video") != NULL;
+  bool setAudio = strstr(request, "audio") != NULL;
+  bool setSubtitles = strstr(request, "subtitles") != NULL;
   uint16_t clientPort = 0;
   uint16_t serverPort = 0;
   uint8_t rtpChannel = 0;
 
   // Extract client port or RTP channel based on transport method
   if (session.isTCP) {
-    int interleaveStart = request.indexOf("interleaved=") + 12; 
-    int interleaveEnd = request.indexOf("-", interleaveStart); 
-    rtpChannel = request.substring(interleaveStart, interleaveEnd).toInt();
-  } else {
-    int rtpPortStart = request.indexOf("client_port=") + 12;
-    int rtpPortEnd = request.indexOf("-", rtpPortStart);
-    clientPort = request.substring(rtpPortStart, rtpPortEnd).toInt();
+    char* interleaveStart = strstr(request, "interleaved=");
+    if (interleaveStart) {
+      interleaveStart += 12;
+      char* interleaveEnd = strchr(interleaveStart, '-');
+      if (interleaveStart && interleaveEnd) {
+        *interleaveEnd = 0;
+        rtpChannel = atoi(interleaveStart);
+        ESP_LOGI(LOG_TAG, "Extracted RTP channel: %d", rtpChannel);
+      } else {
+        ESP_LOGE(LOG_TAG, "Failed to find interleave end");
+      }
+    } else {
+      ESP_LOGE(LOG_TAG, "Failed to find interleaved=");
+    }
+  } else if (!session.isMulticast) {
+    char* rtpPortStart = strstr(request, "client_port=");
+    if (rtpPortStart) {
+      rtpPortStart += 12;
+      char* rtpPortEnd = strchr(rtpPortStart, '-');
+      if (rtpPortStart && rtpPortEnd) {
+        *rtpPortEnd = 0;
+        clientPort = atoi(rtpPortStart);
+        ESP_LOGI(LOG_TAG, "Extracted client port: %d", clientPort);
+      } else {
+        ESP_LOGE(LOG_TAG, "Failed to find client port end");
+      }
+    } else {
+      ESP_LOGE(LOG_TAG, "Failed to find client_port=");
+    }
   }
 
   // Setup video, audio, or subtitles based on the request
@@ -832,31 +879,34 @@ void RTSPServer::handleSetup(const String& request, RTSP_Session& session) {
     this->rtspStreamBuffer = (uint8_t*)ps_malloc(MAX_RTSP_BUFFER);
   }
 #endif
-  //this->rtspFrameSemaphore = xSemaphoreCreateBinary();
 
-  char response[512];
+  char* response = (char*)malloc(512);
+  if (response == NULL) {
+    ESP_LOGE(LOG_TAG, "Failed to allocate memory");
+    return;
+  }
 
   // Formulate the response based on transport method
   if (session.isTCP) {
-    snprintf(response, sizeof(response),
+    snprintf(response, 512,
              "RTSP/1.0 200 OK\r\n"
              "CSeq: %d\r\n"
              "%s\r\n"
              "Transport: RTP/AVP/TCP;unicast;interleaved=%d-%d\r\n"
              "Session: %lu\r\n\r\n",
              session.cseq, dateHeader(), rtpChannel, rtpChannel + 1, session.sessionID);
-
   } else if (session.isMulticast) {
-    snprintf(response, sizeof(response),
+    snprintf(response, 512,
              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nTransport: RTP/AVP;multicast;destination=%s;port=%d-%d;ttl=%d\r\nSession: %lu\r\n\r\n",
              session.cseq, dateHeader(), this->rtpIp.toString().c_str(), serverPort, serverPort + 1, this->rtpTTL, session.sessionID);
   } else {
-    snprintf(response, sizeof(response),
+    snprintf(response, 512,
              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nTransport: RTP/AVP;unicast;destination=127.0.0.1;source=127.0.0.1;client_port=%d-%d;server_port=%d-%d\r\nSession: %lu\r\n\r\n",
              session.cseq, dateHeader(), clientPort, clientPort + 1, serverPort, serverPort + 1, session.sessionID);
   }
 
   write(session.sock, response, strlen(response));
+  free(response);
   this->sessions[session.sessionID] = session;
 }
 
@@ -948,14 +998,28 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
  */
 bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   char buffer[1024];
-  int len = read(sock, buffer, 1023);
-  if (len <= 0) {
+  int totalLen = 0;
+  int len = 0;
+
+  // Read data from socket until end of RTSP header or buffer limit is reached
+  while ((len = read(sock, buffer + totalLen, sizeof(buffer) - totalLen - 1)) > 0) {
+    totalLen += len;
+    if (strstr(buffer, "\r\n\r\n")) {
+      break;
+    }
+    if (totalLen >= sizeof(buffer) - 1) {
+      ESP_LOGE(LOG_TAG, "Request too large for buffer");
+      return false;
+    }
+  }
+
+  if (totalLen <= 0) {
     ESP_LOGE(LOG_TAG, "Error reading from socket or connection closed");
     return false;
   }
-  buffer[len] = 0;
 
-  // Check if the message is an RTP packet (indicated by '$' at the start)
+  buffer[totalLen] = 0; // Null-terminate the buffer
+
   if (buffer[0] == '$') { 
     return true; 
   }
@@ -964,15 +1028,13 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   uint8_t version = (firstByte >> 6) & 0x03;
   if (version == 2) { 
     uint8_t payloadType = buffer[1] & 0x7F;
-    if (payloadType >= 200 && payloadType <= 204) { 
-      return true; 
-    } else {
+    if (payloadType >= 200 && payloadType <= 204) {
       return true;
     }
+    return true;
   }
 
-  String request(buffer);
-  int cseq = captureCSeq(request);
+  int cseq = captureCSeq(buffer);
   if (cseq == -1) {
     ESP_LOGE(LOG_TAG, "CSeq not found in request");
     write(sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
@@ -985,20 +1047,23 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   IPAddress clientIP = IPAddress(clientAddr.sin_addr.s_addr);
 
   // Extract session ID from the request
-  int sessionIDStart = request.indexOf("Session: ");
-  if (sessionIDStart != -1) {
-    int sessionIDEnd = request.indexOf("\r\n", sessionIDStart);
-    String sessionIDStr = request.substring(sessionIDStart + 9, sessionIDEnd);
-    sessionID = strtoul(sessionIDStr.c_str(), NULL, 10);
-    if (sessions.find(sessionID) != sessions.end()) {
-      session = sessions[sessionID]; 
-      sessionExists = true;
-      session.cseq = cseq;
-      sessions[sessionID] = session;
+  char* sessionIDStr = strstr(buffer, "Session: ");
+  if (sessionIDStr) {
+    sessionIDStr += 9;
+    char* sessionIDEnd = strstr(sessionIDStr, "\r\n");
+    if (sessionIDEnd) {
+      *sessionIDEnd = 0;
+      sessionID = strtoul(sessionIDStr, NULL, 10);
+      *sessionIDEnd = '\r'; // Restore the character
+      if (sessions.find(sessionID) != sessions.end()) {
+        session = sessions[sessionID]; 
+        sessionExists = true;
+        session.cseq = cseq;
+        sessions[sessionID] = session;
+      }
     }
   }
 
-  // Check if a session with the same client IP exists
   if (!sessionExists) {
     for (const auto& sess : sessions) {
       if (sess.second.clientIP == clientIP) {
@@ -1011,7 +1076,6 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
     }
   }
 
-  // Create a new session if it does not exist
   if (!sessionExists) {
     session = {
       esp_random(),
@@ -1030,30 +1094,31 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   }
 
   // Handle different RTSP methods
-  if (request.startsWith("OPTIONS")) {
+  if (strncmp(buffer, "OPTIONS", 7) == 0) {
     ESP_LOGI(LOG_TAG, "HandleOptions");
-    this->handleOptions(request, session);
-  } else if (request.startsWith("DESCRIBE")) {
+    this->handleOptions(buffer, session);
+  } else if (strncmp(buffer, "DESCRIBE", 8) == 0) {
     ESP_LOGI(LOG_TAG, "HandleDescribe");
     this->handleDescribe(session);
-  } else if (request.startsWith("SETUP")) {
-    ESP_LOGI(LOG_TAG, "HandleSetups");
-    this->handleSetup(request, session);
-  } else if (request.startsWith("PLAY")) {
+  } else if (strncmp(buffer, "SETUP", 5) == 0) {
+    ESP_LOGI(LOG_TAG, "HandleSetup");
+    this->handleSetup(buffer, session);
+  } else if (strncmp(buffer, "PLAY", 4) == 0) {
     ESP_LOGI(LOG_TAG, "HandlePlay");
     this->handlePlay(session);
-  } else if (request.startsWith("TEARDOWN")) {
+  } else if (strncmp(buffer, "TEARDOWN", 8) == 0) {
     ESP_LOGI(LOG_TAG, "HandleTeardown");
     this->handleTeardown(session);
     return false;
-  } else if (request.startsWith("PAUSE")) {
+  } else if (strncmp(buffer, "PAUSE", 5) == 0) {
     ESP_LOGI(LOG_TAG, "HandlePause");
     this->handlePause(session);
   } else {
-    ESP_LOGW(LOG_TAG, "Unknown RTSP method: %s", request.c_str());
+    ESP_LOGW(LOG_TAG, "Unknown RTSP method: %s", buffer);
   }
   return true;
 }
+
 /**
  * @brief Sets a socket to non-blocking mode.
  * 
