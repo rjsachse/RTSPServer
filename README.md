@@ -28,6 +28,8 @@ This library requires the ESP32 core by Espressif. Ensure you have at least vers
 
 2. **Library Manager**:
    - Open the Arduino IDE.
+   - Search for ESP32-RTSPServer
+   - or
    - Go to `Sketch` -> `Include Library` -> `Add .ZIP Library...`.
    - Select the downloaded `ESP32-RTSPServer.zip` file.
 
@@ -36,7 +38,7 @@ This library requires the ESP32 core by Espressif. Ensure you have at least vers
 Basic Setup
 ```cpp
 
-#include <RTSPServer.h>
+#include <ESP32-RTSPServer.h>
 
 // Include all other libraries and setups eg Camera, Audio
 
@@ -143,10 +145,10 @@ void loop() {
 - ~~**Overview**: Brief introduction to what the library does.~~
 - ~~**Features**: Highlight key features.~~
 - ~~**Installation**: Instructions for installing the library.~~
-- **Usage**: Examples of how to include and use the library in a sketch.
+- ~~**Usage**: Examples of how to include and use the library in a sketch.~~
 - **API Reference**: Documentation for the main functions and classes.
-- **Example**: Simple example code.
-- **License**: Licensing information.
+- ~~**Example**: Simple example code.~~
+- ~~**License**: Licensing information.~~
 - **Contributions**: How to contribute to the project.
 - **Support**: Where to get help.
 - **Acknowledgements**: Any special thanks or acknowledgments.
