@@ -23,12 +23,14 @@ jobs:
         sed -i "s/^version=.*/version=$VERSION/" library.properties
 
     - name: Commit changes
+      env:
+        GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add library.properties
         git commit -m "Update version to $VERSION"
-        git push origin HEAD:main
+        git push https://github.com/rjsachse/ESP32-RTSPServer.git HEAD:main
 
     - name: Create ZIP file
       run: zip -r ESP32-RTSPServer.zip . -x "*.git*"
