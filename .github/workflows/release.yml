@@ -23,22 +23,10 @@ jobs:
         sed -i "s/^version=.*/version=$VERSION/" library.properties
 
     - name: Commit changes
-      env:
-        GITHUB_TOKEN: ${{ secrets.ACTIONS_TOKEN }}
       run: |
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         git add library.properties
         git commit -m "Update version to $VERSION"
-        git push https://github.com/rjsachse/ESP32-RTSPServer.git HEAD:main
+        git push origin HEAD:main
 
-    - name: Create ZIP file
-      run: zip -r ESP32-RTSPServer.zip . -x "*.git*"
-
-    - name: Upload release asset
-      uses: actions/upload-release-asset@v1
-      with:
-        upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./ESP32-RTSPServer.zip
-        asset_name: ESP32-RTSPServer.zip
-        asset_content_type: application/zip
