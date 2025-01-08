@@ -5,7 +5,7 @@
 #include "lwip/sockets.h"
 #include <esp_log.h>
 #include <map>
-#include <Arduino.h>  // Include the Arduino header for String type
+//#include <Arduino.h>  // Include the Arduino header for String type
 
 #define MAX_RTSP_BUFFER (512 * 1024)
 #define RTP_STACK_SIZE (1024 * 4)
@@ -245,7 +245,7 @@ private:
    * @param request The RTSP request.
    * @return The CSeq value.
    */
-  int captureCSeq(String request);
+  int captureCSeq(char* request);
 
   /**
    * @brief Generates a new session ID.
@@ -258,7 +258,7 @@ private:
    * @param request The RTSP request.
    * @return The extracted session ID.
    */
-  uint32_t extractSessionID(const String& request);
+  uint32_t extractSessionID(char* request);
 
   /**
    * @brief Generates the Date header for RTSP responses.
@@ -271,7 +271,7 @@ private:
    * @param request The RTSP request.
    * @param session The RTSP session.
    */
-  void handleOptions(const String& request, RTSP_Session& session);
+  void handleOptions(char* request, RTSP_Session& session);
 
   /**
    * @brief Handles the DESCRIBE RTSP request.
@@ -284,7 +284,7 @@ private:
    * @param request The RTSP request.
    * @param session The RTSP session.
    */
-  void handleSetup(const String& request, RTSP_Session& session);
+  void handleSetup(char* request, RTSP_Session& session);
 
   /**
    * @brief Handles the PLAY RTSP request.
