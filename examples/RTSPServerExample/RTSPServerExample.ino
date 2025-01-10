@@ -326,7 +326,7 @@ void setup() {
   xTaskCreate(sendVideo, "Video", 4608, NULL, 1, &videoTaskHandle);
   
   // You can use a task to send subtitles every second
-  //xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+  //xTaskCreate(sendSubtitles, "Subtitles", 2560, NULL, 1, &subtitlesTaskHandle);
 
   // Or a callback to send the subtitles with the callback function 
   rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period

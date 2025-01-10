@@ -48,6 +48,19 @@ public:
     NONE,
   };
 
+  /**
+   * @brief Structure to hold parameters for the client task.
+   * 
+   * This structure contains the necessary information to handle an RTSP client
+   * connection, including the RTSP server instance, client socket, and client
+   * address.
+   */
+  struct ClientTaskParams {
+    RTSPServer* server;         ///< Pointer to the RTSP server instance
+    int clientSock;             ///< The socket file descriptor for the client
+    struct sockaddr_in clientAddr; ///< The client's address information
+  };
+
   RTSPServer();  // Default constructor
   ~RTSPServer();  // Destructor
 
@@ -142,6 +155,7 @@ public:
   uint16_t rtpVideoPort;
   uint16_t rtpAudioPort;
   uint16_t rtpSubtitlesPort;
+  uint8_t maxRTSPClients;
 
 private:
   int rtspSocket;
@@ -149,6 +163,7 @@ private:
   int audioRtpSocket;
   int subtitlesRtpSocket;
   int activeRTSPClients;
+  uint8_t maxClients;
   SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
   TaskHandle_t rtpVideoTaskHandle;
   TaskHandle_t rtspTaskHandle;
@@ -325,6 +340,12 @@ private:
    * @return true if the preparation is successful, false otherwise.
    */
   bool prepRTSP();
+
+  /**
+   * @brief Task to handle RTSP client connections.
+   * @param pvParameters Pointer to a structure containing the RTSPServer instance and client information.
+   */
+  static void clientTask(void* pvParameters);
 
   /**
    * @brief Sets a socket to non-blocking mode.

@@ -17,12 +17,14 @@ RTSPServer::RTSPServer()
     rtpVideoPort(5430),
     rtpAudioPort(5432),
     rtpSubtitlesPort(5434),
+    maxRTSPClients(3),
     //
     rtspSocket(-1),
     videoRtpSocket(-1),
     audioRtpSocket(-1),
     subtitlesRtpSocket(-1),
     activeRTSPClients(0),
+    maxClients(1),
     rtpVideoTaskHandle(NULL),
     rtspTaskHandle(NULL),
     rtspStreamBuffer(NULL),
@@ -201,21 +203,59 @@ bool RTSPServer::reinit() {
  * @param packetSize Size of the packet data.
  * @param sock Socket to send the packet through. 
  */
+// void RTSPServer::sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock) {
+//   if (xSemaphoreTake(sendTcpMutex, portMAX_DELAY) == pdTRUE) {
+//     ssize_t sent = send(sock, packet, packetSize, 0);
+//     if (sent < 0) {
+//       int err = errno;
+//       if (err != EPIPE && err != ECONNRESET && err != ENOTCONN && err != EBADF) {
+//         // If client has closed the connection, these are expected errors else
+//         ESP_LOGE(LOG_TAG, "Failed to send TCP packet, errno: %d", err);
+//       }
+//     }
+//     xSemaphoreGive(sendTcpMutex);
+//   } else {
+//       ESP_LOGE(LOG_TAG, "Failed to acquire mutex");
+//   }
+// }
+
 void RTSPServer::sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock) {
   if (xSemaphoreTake(sendTcpMutex, portMAX_DELAY) == pdTRUE) {
-    ssize_t sent = send(sock, packet, packetSize, 0);
-    if (sent < 0) {
-      int err = errno;
-      if (err != EPIPE && err != ECONNRESET && err != ENOTCONN && err != EBADF) {
-        // If client has closed the connection, these are expected errors else
-        ESP_LOGE(LOG_TAG, "Failed to send TCP packet, errno: %d", err);
+    ssize_t sent = 0;
+    while (sent < packetSize) {
+      ssize_t result = send(sock, packet + sent, packetSize - sent, 0);
+      if (result < 0) {
+        int err = errno;
+        if (err == EAGAIN || err == EWOULDBLOCK) {
+          // Use select to wait for the socket to become writable
+          fd_set write_fds;
+          FD_ZERO(&write_fds);
+          FD_SET(sock, &write_fds);
+          struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 }; // 100ms
+          int ret = select(sock + 1, NULL, &write_fds, NULL, &tv);
+          if (ret <= 0) {
+            // Select failed or timeout occurred
+            ESP_LOGE(LOG_TAG, "Failed to send TCP packet, select timeout or error");
+            break;
+          }
+          continue; // Retry sending
+        } else if (err != EPIPE && err != ECONNRESET && err != ENOTCONN && err != EBADF) {
+          // If the client has closed the connection, these are expected errors, else log error
+          ESP_LOGE(LOG_TAG, "Failed to send TCP packet, errno: %d", err);
+          break;
+        } else {
+          break; // Connection closed by the client
+        }
+      } else {
+        sent += result;
       }
     }
     xSemaphoreGive(sendTcpMutex);
   } else {
-      ESP_LOGE(LOG_TAG, "Failed to acquire mutex");
+    ESP_LOGE(LOG_TAG, "Failed to acquire mutex");
   }
 }
+
 
 /**
  * @brief Sends RTP subtitles.
@@ -450,9 +490,11 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
  */
 bool RTSPServer::readyToSendFrame() const {
   bool send = false;
+  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
   if (this->activeRTSPClients > 0 && this->rtpFrameSent) {
     send = true;
   }
+  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -463,9 +505,11 @@ bool RTSPServer::readyToSendFrame() const {
  */
 bool RTSPServer::readyToSendAudio() const {
   bool send = false;
+  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
   if (this->activeRTSPClients > 0 && this->rtpAudioSent) {
     send = true;
   }
+  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -476,9 +520,11 @@ bool RTSPServer::readyToSendAudio() const {
  */
 bool RTSPServer::readyToSendSubtitles() const {
   bool send = false;
+  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
   if (this->activeRTSPClients > 0 && this->rtpSubtitlesSent) {
     send = true;
   }
+  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -867,6 +913,9 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
     } else {
       ESP_LOGE(LOG_TAG, "Failed to find client_port=");
     }
+  } else {
+    // else is multicast so increase max clients
+    this->maxClients = this->maxRTSPClients;
   }
 
   // Setup video, audio, or subtitles based on the request
@@ -1018,6 +1067,7 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   char buffer[1024];
   int totalLen = 0;
   int len = 0;
+  int sessSock = sock;
 
   // Read data from socket until end of RTSP header or buffer limit is reached
   while ((len = recv(sock, buffer + totalLen, sizeof(buffer) - totalLen - 1, 0)) > 0) {
@@ -1034,7 +1084,7 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   if (totalLen <= 0) {
     int err = errno;
     if (err == EWOULDBLOCK || err == EAGAIN) {
-      ESP_LOGI(LOG_TAG, "Non-blocking socket has no data, error: %d", err);
+      //ESP_LOGI(LOG_TAG, "Non-blocking socket has no data, error: %d", err);
       return true;
     } else if (err == ECONNRESET || err == ENOTCONN) {
       // Handle teardown when connection is reset or not connected based on client IP
@@ -1118,7 +1168,7 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
       0,
       0,
       0,
-      sock,
+      sessSock,
       cseq,
       false,
       false,
@@ -1203,7 +1253,40 @@ bool RTSPServer::prepRTSP() {
 }
 
 /**
+ * @brief Task to handle RTSP client connections.
+ * 
+ * This function handles RTSP requests from a client and processes them in a loop
+ * until the connection is closed or an error occurs.
+ * 
+ * @param pvParameters Pointer to a structure containing the RTSPServer instance and client information.
+ */
+void RTSPServer::clientTask(void* pvParameters) {
+  ClientTaskParams* params = static_cast<ClientTaskParams*>(pvParameters);
+  RTSPServer* server = params->server;
+  int clientSock = params->clientSock;
+  struct sockaddr_in clientAddr = params->clientAddr;
+
+  // Optionally set the client socket to non-blocking mode
+  server->setNonBlocking(clientSock);
+
+  while (true) {
+    bool keepConnection = server->handleRTSPRequest(clientSock, clientAddr);
+    if (!keepConnection) {
+      close(clientSock);
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100)); // Delay to prevent busy waiting
+  }
+  // Free the allocated memory for parameters
+  delete params;
+  vTaskDelete(NULL);
+}
+
+/**
  * @brief Sets a socket to non-blocking mode.
+ * 
+ * This function sets the given socket to non-blocking mode, allowing it to
+ * perform operations that would normally block, without blocking.
  * 
  * @param sock The socket file descriptor.
  */
@@ -1216,7 +1299,7 @@ void RTSPServer::setNonBlocking(int sock) {
   if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) == -1) { 
     ESP_LOGE(LOG_TAG, "Failed to set socket to non-blocking mode"); 
   } else {
-    ESP_LOGD(LOG_TAG, "Socket set to non-blocking mode");
+    ESP_LOGI(LOG_TAG, "Socket set to non-blocking mode");
   }
 }
 
@@ -1233,6 +1316,40 @@ void RTSPServer::rtspTaskWrapper(void* pvParameters) {
 /**
  * @brief Task for handling RTSP requests.
  */
+
+// NOT WORKING YET FOR MULTIPLE CLIENTS !!!
+// void RTSPServer::rtspTask() {
+//   struct sockaddr_in clientAddr;
+//   socklen_t clientLen = sizeof(clientAddr);
+//   setNonBlocking(rtspSocket);
+
+//   while (true) {
+//     xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
+//     if (this->activeRTSPClients >= this->maxClients) {
+//       xSemaphoreGive(clientsMutex); // Release the mutex
+//       vTaskDelay(pdMS_TO_TICKS(100)); // Delay to yield CPU time
+//       continue;
+//     }
+//     xSemaphoreGive(clientsMutex); // Release the mutex
+
+//     int client_sock = accept(this->rtspSocket, (struct sockaddr *)&clientAddr, &clientLen);
+//     if (client_sock >= 0) {
+//       ESP_LOGI(LOG_TAG, "New RTSP connection from %s:%d", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+//       // Allocate memory for client task parameters
+//       ClientTaskParams* params = new ClientTaskParams{this, client_sock, clientAddr};
+
+//       // Create a new task for the client
+//       xTaskCreate(RTSPServer::clientTask, "clientTask", 8192, params, tskIDLE_PRIORITY, NULL);
+//     } else if (errno != EWOULDBLOCK && errno != EAGAIN) {
+//       ESP_LOGE(LOG_TAG, "Failed to accept client connection, error: %d", errno);
+//     } else {
+//       vTaskDelay(pdMS_TO_TICKS(10)); // Delay to yield CPU time
+//     }
+//   }
+//   vTaskDelete(NULL);
+// }
+
 void RTSPServer::rtspTask() {
   struct sockaddr_in clientAddr;
   socklen_t clientLen = sizeof(clientAddr);
