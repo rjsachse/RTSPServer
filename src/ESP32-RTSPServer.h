@@ -77,6 +77,14 @@ public:
    */
   bool reinit();
 
+  /** 
+   * @brief Sends a TCP packet.
+   * @param packet Pointer to the packet data.
+   * @param packetSize Size of the packet data.
+   * @param sock Socket to send the packet through. 
+   */
+  void sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock);
+
   /**
    * @brief Sends an RTSP frame.
    * @param data Pointer to the frame data.
@@ -101,6 +109,10 @@ public:
    */
   void sendRTSPSubtitles(char* data, size_t len);
 
+  /**
+   * @brief Starts a timer for subtitles.
+   * @param userCallback Callback function to be called when the timer expires.
+   */
   void startSubtitlesTimer(esp_timer_cb_t userCallback);
 
   /**
@@ -167,6 +179,8 @@ private:
   bool isAudio;
   bool isSubtitles;
   esp_timer_handle_t sendSubtitlesTimer;
+  SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
+
 
   /**
    * @brief Sets up RTP streaming.
@@ -223,12 +237,6 @@ private:
    * @brief Task for handling RTP video.
    */
   void rtpVideoTask();
-
-  /**
-   * @brief Task wrapper for RTSP.
-   * @param pvParameters Task parameters.
-   */
-  static void rtspTaskWrapper(void* pvParameters);
 
   /**
    * @brief Increments the count of active clients.
@@ -313,22 +321,27 @@ private:
   bool handleRTSPRequest(int sockfd, struct sockaddr_in clientAddr);
 
   /**
+   * @brief Prepares the RTSP server for streaming.
+   * @return true if the preparation is successful, false otherwise.
+   */
+  bool prepRTSP();
+
+  /**
    * @brief Sets a socket to non-blocking mode.
    * @param sockfd The socket file descriptor.
    */
   void setNonBlocking(int sockfd);
 
   /**
+   * @brief Task wrapper for RTSP.
+   * @param pvParameters Task parameters.
+   */
+  static void rtspTaskWrapper(void* pvParameters);
+  
+  /**
    * @brief Task for handling RTSP requests.
    */
   void rtspTask();
-
-  /**
-   * @brief Prepares the RTSP server for streaming.
-   * @return true if the preparation is successful, false otherwise.
-   */
-  bool prepRTSP();
-
   static const char* LOG_TAG;  // Define a log tag for the class
 };
 

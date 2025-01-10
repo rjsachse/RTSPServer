@@ -8,6 +8,7 @@ This is my first library I have created. RTSPServer Library is for the ESP32, de
 - **Audio Streaming**: Stream audio using I2S.
 - **Subtitles**: Stream subtitles alongside video and audio.
 - **Transport Types**: Supports multiple transport types, including video-only, audio-only, and combined streams.
+- **Protocols**: Stream multicast, unicast UDP & TCP (TCP is Slower).
 
 ## Prerequisites
 This library requires the ESP32 core by Espressif. Ensure you have at least version 3.0.7 installed.
