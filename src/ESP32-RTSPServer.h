@@ -12,6 +12,7 @@
 #define RTP_PRI 10
 #define RTSP_STACK_SIZE (1024 * 8)
 #define RTSP_PRI 10
+#define MAX_CLIENTS 5 // max rtsp clients
 
 /**
  * @brief Structure representing an RTSP session.
@@ -162,7 +163,7 @@ private:
   int videoRtpSocket;
   int audioRtpSocket;
   int subtitlesRtpSocket;
-  int activeRTSPClients;
+  uint8_t activeRTSPClients; 
   uint8_t maxClients;
   SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
   TaskHandle_t rtpVideoTaskHandle;
@@ -193,8 +194,12 @@ private:
   bool isVideo;
   bool isAudio;
   bool isSubtitles;
+  bool firstClientConnected; 
+  bool firstClientIsMulticast; 
+  bool firstClientIsTCP;
   esp_timer_handle_t sendSubtitlesTimer;
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
+  SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
 
 
   /**
@@ -252,6 +257,22 @@ private:
    * @brief Task for handling RTP video.
    */
   void rtpVideoTask();
+
+  /**
+   * @brief Set max clients.
+   */
+  void setMaxClients(uint8_t newMaxClients); 
+
+  /**
+   * @brief Get max clients.
+   */
+  uint8_t getMaxClients();
+
+  /**
+   * @brief Get the count of active clients.
+   * @return Active clients.
+   */
+  uint8_t getActiveClients();
 
   /**
    * @brief Increments the count of active clients.
@@ -336,22 +357,17 @@ private:
   bool handleRTSPRequest(int sockfd, struct sockaddr_in clientAddr);
 
   /**
+   * @brief Sets a socket to non-blocking mode.
+   * @param sockfd The socket file descriptor.
+   * @return true if handled successfully, false otherwise.
+   */
+  bool setNonBlocking(int sockfd);
+
+  /**
    * @brief Prepares the RTSP server for streaming.
    * @return true if the preparation is successful, false otherwise.
    */
   bool prepRTSP();
-
-  /**
-   * @brief Task to handle RTSP client connections.
-   * @param pvParameters Pointer to a structure containing the RTSPServer instance and client information.
-   */
-  static void clientTask(void* pvParameters);
-
-  /**
-   * @brief Sets a socket to non-blocking mode.
-   * @param sockfd The socket file descriptor.
-   */
-  void setNonBlocking(int sockfd);
 
   /**
    * @brief Task wrapper for RTSP.
