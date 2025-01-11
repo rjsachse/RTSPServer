@@ -12,6 +12,7 @@
 #define RTP_PRI 10
 #define RTSP_STACK_SIZE (1024 * 8)
 #define RTSP_PRI 10
+#define MAX_CLIENTS 5 // max rtsp clients
 
 /**
  * @brief Structure representing an RTSP session.
@@ -46,6 +47,19 @@ public:
     AUDIO_AND_SUBTITLES,
     VIDEO_AUDIO_SUBTITLES,
     NONE,
+  };
+
+  /**
+   * @brief Structure to hold parameters for the client task.
+   * 
+   * This structure contains the necessary information to handle an RTSP client
+   * connection, including the RTSP server instance, client socket, and client
+   * address.
+   */
+  struct ClientTaskParams {
+    RTSPServer* server;         ///< Pointer to the RTSP server instance
+    int clientSock;             ///< The socket file descriptor for the client
+    struct sockaddr_in clientAddr; ///< The client's address information
   };
 
   RTSPServer();  // Default constructor
@@ -142,13 +156,15 @@ public:
   uint16_t rtpVideoPort;
   uint16_t rtpAudioPort;
   uint16_t rtpSubtitlesPort;
+  uint8_t maxRTSPClients;
 
 private:
   int rtspSocket;
   int videoRtpSocket;
   int audioRtpSocket;
   int subtitlesRtpSocket;
-  int activeRTSPClients;
+  uint8_t activeRTSPClients; 
+  uint8_t maxClients;
   SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
   TaskHandle_t rtpVideoTaskHandle;
   TaskHandle_t rtspTaskHandle;
@@ -178,8 +194,12 @@ private:
   bool isVideo;
   bool isAudio;
   bool isSubtitles;
+  bool firstClientConnected; 
+  bool firstClientIsMulticast; 
+  bool firstClientIsTCP;
   esp_timer_handle_t sendSubtitlesTimer;
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
+  SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
 
 
   /**
@@ -237,6 +257,22 @@ private:
    * @brief Task for handling RTP video.
    */
   void rtpVideoTask();
+
+  /**
+   * @brief Set max clients.
+   */
+  void setMaxClients(uint8_t newMaxClients); 
+
+  /**
+   * @brief Get max clients.
+   */
+  uint8_t getMaxClients();
+
+  /**
+   * @brief Get the count of active clients.
+   * @return Active clients.
+   */
+  uint8_t getActiveClients();
 
   /**
    * @brief Increments the count of active clients.
@@ -321,16 +357,17 @@ private:
   bool handleRTSPRequest(int sockfd, struct sockaddr_in clientAddr);
 
   /**
+   * @brief Sets a socket to non-blocking mode.
+   * @param sockfd The socket file descriptor.
+   * @return true if handled successfully, false otherwise.
+   */
+  bool setNonBlocking(int sockfd);
+
+  /**
    * @brief Prepares the RTSP server for streaming.
    * @return true if the preparation is successful, false otherwise.
    */
   bool prepRTSP();
-
-  /**
-   * @brief Sets a socket to non-blocking mode.
-   * @param sockfd The socket file descriptor.
-   */
-  void setNonBlocking(int sockfd);
 
   /**
    * @brief Task wrapper for RTSP.

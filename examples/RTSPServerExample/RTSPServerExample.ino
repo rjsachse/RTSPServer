@@ -316,17 +316,17 @@ void setup() {
   if (setupMic()) {
     Serial.println("Microphone Setup Complete");
     // Create tasks for sending audio
-    xTaskCreate(sendAudio, "Audio", 3584, NULL, 1, &audioTaskHandle);
+    xTaskCreate(sendAudio, "Audio", 8192, NULL, 1, &audioTaskHandle);
   } else {
     Serial.println("Mic Setup Failed!");
   }
 #endif
 
   // Create tasks for sending video, and subtitles
-  xTaskCreate(sendVideo, "Video", 4608, NULL, 1, &videoTaskHandle);
+  xTaskCreate(sendVideo, "Video", 8192, NULL, 1, &videoTaskHandle);
   
   // You can use a task to send subtitles every second
-  //xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+  //xTaskCreate(sendSubtitles, "Subtitles", 2560, NULL, 1, &subtitlesTaskHandle);
 
   // Or a callback to send the subtitles with the callback function 
   rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
