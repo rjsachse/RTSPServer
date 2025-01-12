@@ -35,6 +35,10 @@ const char *password = "**********";
 // RTSPServer instance
 RTSPServer rtspServer;
 
+// User defined options
+//#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP. May cause issues
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming, Create a separate task for video streaming so does not block main sketch video task
+
 // Define HAVE_AUDIO to include audio-related code
 #define HAVE_AUDIO // Comment out if don't have audio
 
@@ -330,6 +334,8 @@ void setup() {
 
   // Or a callback to send the subtitles with the callback function 
   rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
+
+  rtspServer.maxRTSPClients = 3; // Set the maximum number of RTSP multicast clients to 3, To override for all transports #define OVERRIDE_RTSP_SINGLE_CLIENT_MODE
 
   // Initialize the RTSP server
   /**

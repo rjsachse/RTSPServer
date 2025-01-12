@@ -14,6 +14,14 @@
 #define RTSP_PRI 10
 #define MAX_CLIENTS 5 // max rtsp clients
 
+// Add these before class definition
+#define RTSP_SOCKET_TIMEOUT_SEC 5
+#define RTSP_BUFFER_SIZE 8092
+
+// User defined options in sketch
+//#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming, Create a separate task for video streaming so does not block main sketch video task
+
 /**
  * @brief Structure representing an RTSP session.
  */
@@ -28,6 +36,7 @@ struct RTSP_Session {
   bool isMulticast;
   bool isPlaying;
   bool isTCP;
+  uint32_t lastActiveTime;  // Track when session was last active
 };
 
 /**
@@ -47,19 +56,6 @@ public:
     AUDIO_AND_SUBTITLES,
     VIDEO_AUDIO_SUBTITLES,
     NONE,
-  };
-
-  /**
-   * @brief Structure to hold parameters for the client task.
-   * 
-   * This structure contains the necessary information to handle an RTSP client
-   * connection, including the RTSP server instance, client socket, and client
-   * address.
-   */
-  struct ClientTaskParams {
-    RTSPServer* server;         ///< Pointer to the RTSP server instance
-    int clientSock;             ///< The socket file descriptor for the client
-    struct sockaddr_in clientAddr; ///< The client's address information
   };
 
   RTSPServer();  // Default constructor
@@ -163,9 +159,7 @@ private:
   int videoRtpSocket;
   int audioRtpSocket;
   int subtitlesRtpSocket;
-  uint8_t activeRTSPClients; 
   uint8_t maxClients;
-  SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
   TaskHandle_t rtpVideoTaskHandle;
   TaskHandle_t rtspTaskHandle;
   std::map<uint32_t, RTSP_Session> sessions;
@@ -194,6 +188,7 @@ private:
   bool isVideo;
   bool isAudio;
   bool isSubtitles;
+  bool isPlaying;
   bool firstClientConnected; 
   bool firstClientIsMulticast; 
   bool firstClientIsTCP;
@@ -201,6 +196,9 @@ private:
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
   SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
 
+  static constexpr uint32_t SESSION_TIMEOUT_MS = 60000; // 60 second timeout
+  void cleanupTimedOutSessions();
+  uint32_t getSessionTimeout() const { return SESSION_TIMEOUT_MS; }
 
   /**
    * @brief Sets up RTP streaming.
@@ -257,6 +255,8 @@ private:
    * @brief Task for handling RTP video.
    */
   void rtpVideoTask();
+
+  void updateIsPlaying();
 
   /**
    * @brief Set max clients.

@@ -23,13 +23,11 @@ RTSPServer::RTSPServer()
     videoRtpSocket(-1),
     audioRtpSocket(-1),
     subtitlesRtpSocket(-1),
-    activeRTSPClients(0),
     maxClients(1),
     rtpVideoTaskHandle(NULL),
     rtspTaskHandle(NULL),
     rtspStreamBuffer(NULL),
     rtspStreamBufferSize(0),
-    //rtspFrameSemaphore(NULL),
     rtpFrameSent(true),
     rtpAudioSent(true),
     rtpSubtitlesSent(true),
@@ -50,13 +48,13 @@ RTSPServer::RTSPServer()
     isVideo(false),
     isAudio(false),
     isSubtitles(false),
+    isPlaying(false),
     firstClientConnected(false),
     firstClientIsMulticast(false),
     firstClientIsTCP(false)
 {
-    clientsMutex = xSemaphoreCreateMutex(); // Initialize the mutex
-    sendTcpMutex = xSemaphoreCreateMutex(); // Initialize the mutex
-    maxClientsMutex = xSemaphoreCreateMutex();
+  sendTcpMutex = xSemaphoreCreateMutex(); // Initialize the mutex
+  maxClientsMutex = xSemaphoreCreateMutex();
 }
 
 /**
@@ -66,7 +64,8 @@ RTSPServer::RTSPServer()
 RTSPServer::~RTSPServer() {
   // Clean up resources
   deinit();
-  vSemaphoreDelete(this->clientsMutex);
+  vSemaphoreDelete(this->sendTcpMutex);
+  vSemaphoreDelete(this->maxClientsMutex);
 }
 
 /**
@@ -188,7 +187,7 @@ void RTSPServer::deinit() {
     free(this->rtspStreamBuffer);
   }
 
-  ESP_LOGI(LOG_TAG, "RTSP server deinitialized.");
+  ESP_LOGI(LOG_TAG, "RTSP server deinitialised.");
 }
 
 /**
@@ -207,59 +206,41 @@ bool RTSPServer::reinit() {
  * @param packetSize Size of the packet data.
  * @param sock Socket to send the packet through. 
  */
-// void RTSPServer::sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock) {
-//   if (xSemaphoreTake(sendTcpMutex, portMAX_DELAY) == pdTRUE) {
-//     ssize_t sent = send(sock, packet, packetSize, 0);
-//     if (sent < 0) {
-//       int err = errno;
-//       if (err != EPIPE && err != ECONNRESET && err != ENOTCONN && err != EBADF) {
-//         // If client has closed the connection, these are expected errors else
-//         ESP_LOGE(LOG_TAG, "Failed to send TCP packet, errno: %d", err);
-//       }
-//     }
-//     xSemaphoreGive(sendTcpMutex);
-//   } else {
-//       ESP_LOGE(LOG_TAG, "Failed to acquire mutex");
-//   }
-// }
-
 void RTSPServer::sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock) {
   if (xSemaphoreTake(sendTcpMutex, portMAX_DELAY) == pdTRUE) {
-    ssize_t sent = 0;
+    size_t sent = 0;
+
     while (sent < packetSize) {
       ssize_t result = send(sock, packet + sent, packetSize - sent, 0);
       if (result < 0) {
         int err = errno;
         if (err == EAGAIN || err == EWOULDBLOCK) {
-          // Use select to wait for the socket to become writable
           fd_set write_fds;
           FD_ZERO(&write_fds);
           FD_SET(sock, &write_fds);
-          struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 }; // 100ms
-          int ret = select(sock + 1, NULL, &write_fds, NULL, &tv);
+
+          int ret = select(sock + 1, NULL, &write_fds, NULL, NULL);
+
           if (ret <= 0) {
-            // Select failed or timeout occurred
-            ESP_LOGE(LOG_TAG, "Failed to send TCP packet, select timeout or error");
+            ESP_LOGW(LOG_TAG, "Socket write timeout, moving to next packet");
             break;
           }
-          continue; // Retry sending
         } else if (err != EPIPE && err != ECONNRESET && err != ENOTCONN && err != EBADF) {
-          // If the client has closed the connection, these are expected errors, else log error
-          ESP_LOGE(LOG_TAG, "Failed to send TCP packet, errno: %d", err);
+          ESP_LOGE(LOG_TAG, "TCP send error: %d", err);
           break;
         } else {
-          break; // Connection closed by the client
+          break; // Connection closed by client
         }
       } else {
         sent += result;
       }
     }
+
     xSemaphoreGive(sendTcpMutex);
   } else {
-    ESP_LOGE(LOG_TAG, "Failed to acquire mutex");
+    ESP_LOGE(LOG_TAG, "Failed to acquire sendTcpMutex");
   }
 }
-
 
 /**
  * @brief Sends RTP subtitles.
@@ -399,23 +380,6 @@ void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddre
  * @param useTCP Indicates if TCP is used.
  */
 void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP) {
-  static uint32_t lastSendTime = millis(); // Track the last time a frame was sent
-  uint32_t currentTime = millis(); // Get the current time in milliseconds
-
-  // Calculate the actual time elapsed since the last frame was sent
-  uint32_t actualElapsedTime = currentTime - lastSendTime;
-  // Increment the timestamp based on the actual elapsed time
-  this->videoTimestamp += (actualElapsedTime * 90000) / 1000;   // Convert milliseconds to 90kHz units
-
-  // Work out the RTP sent FPS to use for subtitles
-  this->rtpFrameCount++; 
-  // Update FPS every second 
-  if (currentTime - this->lastRtpFPSUpdateTime >= 1000) { 
-    this->rtpFps = this->rtpFrameCount; // Store the current FPS 
-    this->rtpFrameCount = 0; // Reset the frame count for the next second 
-    this->lastRtpFPSUpdateTime = currentTime; // Update the last FPS update time 
-  }
-
   const int RtpHeaderSize = 20;
   const int MAX_FRAGMENT_SIZE = 1438;
   uint32_t jpegLen = len;
@@ -484,7 +448,6 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
     fragmentOffset += fragmentLen;
     this->videoSequenceNumber++;
   }
-  lastSendTime = currentTime;
 }
 
 /**
@@ -494,11 +457,9 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
  */
 bool RTSPServer::readyToSendFrame() const {
   bool send = false;
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  if (this->activeRTSPClients > 0 && this->rtpFrameSent) {
+  if (this->isPlaying && this->rtpFrameSent) { // Check if rtpFrameSent is true
     send = true;
   }
-  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -509,11 +470,9 @@ bool RTSPServer::readyToSendFrame() const {
  */
 bool RTSPServer::readyToSendAudio() const {
   bool send = false;
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  if (this->activeRTSPClients > 0 && this->rtpAudioSent) {
+  if (this->isPlaying && this->rtpAudioSent) { // Check if rtpAudioSent is true
     send = true;
   }
-  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -524,11 +483,9 @@ bool RTSPServer::readyToSendAudio() const {
  */
 bool RTSPServer::readyToSendSubtitles() const {
   bool send = false;
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  if (this->activeRTSPClients > 0 && this->rtpSubtitlesSent) {
+  if (this->isPlaying && this->rtpSubtitlesSent) { // Check if rtpSubtitlesSent is true
     send = true;
   }
-  xSemaphoreGive(clientsMutex); // Release the mutex
   return send; 
 }
 
@@ -543,11 +500,11 @@ void RTSPServer::startSubtitlesTimer(esp_timer_cb_t userCallback) {
     .dispatch_method = ESP_TIMER_TASK, // Dispatch method, set to default
     .name = "periodic_timer" ,
     .skip_unhandled_events = false // Optional, can be set to false
-    }; 
-    // Create the timer 
-    esp_timer_create(&timerConfig, &sendSubtitlesTimer); 
-    // Start the timer with the specified period (in microseconds) 
-    esp_timer_start_periodic(sendSubtitlesTimer, 1000000); 
+  }; 
+  // Create the timer 
+  esp_timer_create(&timerConfig, &sendSubtitlesTimer); 
+  // Start the timer with the specified period (in microseconds) 
+  esp_timer_start_periodic(sendSubtitlesTimer, 1000000); 
 }
 
 /**
@@ -567,11 +524,15 @@ void RTSPServer::rtpVideoTask() {
   while (true) {
     //if (xSemaphoreTake(this->rtspFrameSemaphore, portMAX_DELAY) == pdTRUE) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    bool multicastSent = false;
     for (const auto& sessionPair : this->sessions) {
       const RTSP_Session& session = sessionPair.second; 
       if (session.isPlaying) {
         if (session.isMulticast) {
-          this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, this->rtpIp, this->rtpVideoPort, false);
+          if (!multicastSent) {
+            this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, this->rtpIp, this->rtpVideoPort, false);
+            multicastSent = true;
+          }
         } else {
           this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, session.clientIP, session.cVideoPort, session.isTCP);
         }
@@ -579,7 +540,6 @@ void RTSPServer::rtpVideoTask() {
     }
     this->rtspStreamBufferSize = 0;
     this->rtpFrameSent = true;
-    //}
   }
   vTaskDelete(NULL);
 }
@@ -595,6 +555,24 @@ void RTSPServer::rtpVideoTask() {
  */
 void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height) {
   this->rtpFrameSent = false;
+
+  // FPS calculation logic
+  static uint32_t lastSendTime = millis(); // Track the last time a frame was sent
+  uint32_t currentTime = millis(); // Get the current time in milliseconds
+
+  // Calculate the actual time elapsed since the last frame was sent
+  uint32_t actualElapsedTime = currentTime - lastSendTime;
+  // Increment the timestamp based on the actual elapsed time
+  this->videoTimestamp += (actualElapsedTime * 90000) / 1000;   // Convert milliseconds to 90kHz units
+
+  // Work out the RTP sent FPS to use for subtitles
+  this->rtpFrameCount++; 
+  // Update FPS every second 
+  if (currentTime - this->lastRtpFPSUpdateTime >= 1000) { 
+    this->rtpFps = this->rtpFrameCount; // Store the current FPS 
+    this->rtpFrameCount = 0; // Reset the frame count for the next second 
+    this->lastRtpFPSUpdateTime = currentTime; // Update the last FPS update time 
+  }
 #ifdef RTSP_VIDEO_NONBLOCK
   this->vQuality = quality;
   this->vWidth = width;
@@ -603,21 +581,25 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
     memcpy(this->rtspStreamBuffer, data, len);
     this->rtspStreamBufferSize = len;
     xTaskNotifyGive(rtpVideoTaskHandle); // Signal frame ready for RTSP
-    //xSemaphoreGive(this->rtspFrameSemaphore); // Signal frame ready for RTSP
   }
 #else
+  bool multicastSent = false;
   for (const auto& sessionPair : this->sessions) {
     const RTSP_Session& session = sessionPair.second; 
     if (session.isPlaying) {
       if (session.isMulticast) {
-        sendRtpFrame(data, len, quality, width, height, session.sock, this->rtpIp, this->rtpVideoPort, false);
+        if (!multicastSent) {
+          sendRtpFrame(data, len, quality, width, height, session.sock, this->rtpIp, this->rtpVideoPort, false);
+          multicastSent = true;
+        }
       } else {
         sendRtpFrame(data, len, quality, width, height, session.sock, session.clientIP, session.cVideoPort, session.isTCP);
       }
     }
   }
+  #endif
   this->rtpFrameSent = true;
-#endif
+  lastSendTime = currentTime; // Update the last send time
 }
 
 /**
@@ -628,11 +610,15 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
  */
 void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
   this->rtpAudioSent = false;
+  bool multicastSent = false;
   for (const auto& sessionPair : this->sessions) {
     const RTSP_Session& session = sessionPair.second; 
     if (session.isPlaying) {
       if (session.isMulticast) {
-        this->sendRtpAudio(data, len, session.sock, this->rtpIp, this->rtpAudioPort, false);
+        if (!multicastSent) {
+          this->sendRtpAudio(data, len, session.sock, this->rtpIp, this->rtpAudioPort, false);
+          multicastSent = true;
+        }
       } else {
         this->sendRtpAudio(data, len, session.sock, session.clientIP, session.cAudioPort, session.isTCP);
       }
@@ -649,11 +635,15 @@ void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
  */
 void RTSPServer::sendRTSPSubtitles(char* data, size_t len) {
   this->rtpSubtitlesSent = false;
+  bool multicastSent = false;
   for (const auto& sessionPair : this->sessions) {
     const RTSP_Session& session = sessionPair.second; 
     if (session.isPlaying) {
       if (session.isMulticast) {
-        this->sendRtpSubtitles(data, len, session.sock, this->rtpIp, this->rtpSubtitlesPort, false);
+        if (!multicastSent) {
+          this->sendRtpSubtitles(data, len, session.sock, this->rtpIp, this->rtpSubtitlesPort, false);
+          multicastSent = true;
+        }
       } else {
         this->sendRtpSubtitles(data, len, session.sock, session.clientIP, session.cSrtPort, session.isTCP);
       }
@@ -692,11 +682,23 @@ void RTSPServer::setupRTP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IP
   }
 }
 
+void RTSPServer::updateIsPlaying() {
+  bool playing = false;
+  for (const auto& pair : this->sessions) { // Iterate over the map
+    const RTSP_Session& session = pair.second;
+    if (session.isPlaying) { // Check if any session is playing
+      playing = true;
+      break;
+    }
+  }
+  this->isPlaying = playing; // Update the isPlaying member
+}
+
 void RTSPServer::setMaxClients(uint8_t newMaxClients) {
   if (xSemaphoreTake(maxClientsMutex, portMAX_DELAY) == pdTRUE) {
     if (newMaxClients <= MAX_CLIENTS) {
       maxClients = newMaxClients;
-      ESP_LOGI(LOG_TAG, "Max clients updated to: %d", maxClients);
+      ESP_LOGD(LOG_TAG, "Max clients updated to: %d", maxClients);
     } else {
       ESP_LOGW(LOG_TAG, "Requested max clients (%d) exceeds the hardcoded limit (%d). Max clients set to %d.", newMaxClients, MAX_CLIENTS, MAX_CLIENTS);
       maxClients = MAX_CLIENTS;
@@ -717,39 +719,6 @@ uint8_t RTSPServer::getMaxClients() {
   }
   return clients;
 }
-
-/**
- * @brief Get the count of active clients.
- */
-uint8_t RTSPServer::getActiveClients() {
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  uint8_t aC = this->activeRTSPClients;
-  xSemaphoreGive(clientsMutex); // Give the mutex back
-  return aC;
-}
-
-/**
- * @brief Increments the count of active clients.
- */
-void RTSPServer::incrementActiveClients() {
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  this->activeRTSPClients++;
-  xSemaphoreGive(clientsMutex); // Give the mutex back
-}
-
-/**
- * @brief Decrements the count of active clients.
- */
-void RTSPServer::decrementActiveClients() {
-  xSemaphoreTake(clientsMutex, portMAX_DELAY); // Take the mutex
-  if (this->activeRTSPClients > 0) {
-    this->activeRTSPClients--;
-  } else {
-    ESP_LOGW(LOG_TAG, "Attempted to decrement activeRTSPClients below 0");
-  }
-  xSemaphoreGive(clientsMutex); // Give the mutex back
-}
-
 
 /**
  * @brief Captures the CSeq from an RTSP request.
@@ -916,24 +885,7 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
   session.isMulticast = strstr(request, "multicast") != NULL;
   session.isTCP = strstr(request, "RTP/AVP/TCP") != NULL;
 
-  // Check if the first client is multicast and reject unicast or TCP connections
-  if (firstClientConnected && firstClientIsMulticast && (!session.isMulticast || session.isTCP)) {
-    ESP_LOGW(LOG_TAG, "Rejecting unicast or TCP connection because the first client is multicast");
-    char* response = (char*)malloc(512);
-    if (response == NULL) {
-      ESP_LOGE(LOG_TAG, "Failed to allocate memory");
-      return;
-    }
-    snprintf(response, 512,
-             "RTSP/1.0 461 Unsupported Transport\r\n"
-             "CSeq: %d\r\n"
-             "%s\r\n\r\n",
-             session.cseq, dateHeader());
-    write(session.sock, response, strlen(response));
-    free(response);
-    return;
-  }
-
+#ifndef OVERRIDE_RTSP_SINGLE_CLIENT_MODE
   // Track the first client's connection type
   if (!firstClientConnected) {
     firstClientConnected = true;
@@ -944,9 +896,50 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
     if (firstClientIsMulticast) {
       setMaxClients(this->maxRTSPClients);
     } else {
-      setMaxClients(1); // Only allow 1 client for unicast
+      setMaxClients(1); // Only allow 1 client for unicast or TCP
+    }
+  } else {
+    // Check if the first client is multicast and reject unicast or TCP connections
+    if (firstClientIsMulticast) {
+      if (!session.isMulticast) {
+        ESP_LOGW(LOG_TAG, "Rejecting unicast connection because the first client is multicast");
+        char* response = (char*)malloc(512);
+        if (response == NULL) {
+          ESP_LOGE(LOG_TAG, "Failed to allocate memory");
+          return;
+        }
+        snprintf(response, 512,
+                 "RTSP/1.0 461 Unsupported Transport\r\n"
+                 "CSeq: %d\r\n"
+                 "%s\r\n\r\n",
+                 session.cseq, dateHeader());
+        write(session.sock, response, strlen(response));
+        free(response);
+        return;
+      }
+    } else {
+      // Reject any connection that does not match the first client's connection type
+      if (session.isMulticast || session.isTCP != firstClientIsTCP) {
+        ESP_LOGW(LOG_TAG, "Rejecting connection because it does not match the first client's connection type");
+        char* response = (char*)malloc(512);
+        if (response == NULL) {
+          ESP_LOGE(LOG_TAG, "Failed to allocate memory");
+          return;
+        }
+        snprintf(response, 512,
+                 "RTSP/1.0 461 Unsupported Transport\r\n"
+                 "CSeq: %d\r\n"
+                 "%s\r\n\r\n",
+                 session.cseq, dateHeader());
+        write(session.sock, response, strlen(response));
+        free(response);
+        return;
+      }
     }
   }
+#else
+      setMaxClients(this->maxRTSPClients);
+#endif
 
   bool setVideo = strstr(request, "video") != NULL;
   bool setAudio = strstr(request, "audio") != NULL;
@@ -988,25 +981,31 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
     }
   }
 
-  // Setup video, audio, or subtitles based on the request
-  if (setVideo) {
-    session.cVideoPort = clientPort;
-    serverPort = this->rtpVideoPort;
-    this->videoCh = rtpChannel;
-    if(!session.isTCP)this->setupRTP(this->videoRtpSocket, session.isMulticast, serverPort, this->rtpIp);
+// Setup video, audio, or subtitles based on the request
+if (setVideo) {
+  session.cVideoPort = clientPort;
+  serverPort = this->rtpVideoPort;
+  this->videoCh = rtpChannel;
+  if (this->videoRtpSocket == -1) { // Check if the socket has not been set up
+    this->setupRTP(this->videoRtpSocket, session.isMulticast, serverPort, this->rtpIp);
   }
-  if (setAudio) {
-    session.cAudioPort = clientPort;
-    serverPort = this->rtpAudioPort;
-    this->audioCh = rtpChannel;
-    if(!session.isTCP)this->setupRTP(this->audioRtpSocket, session.isMulticast, serverPort, this->rtpIp);
+}
+if (setAudio) {
+  session.cAudioPort = clientPort;
+  serverPort = this->rtpAudioPort;
+  this->audioCh = rtpChannel;
+  if (this->audioRtpSocket == -1) { // Check if the socket has not been set up
+    this->setupRTP(this->audioRtpSocket, session.isMulticast, serverPort, this->rtpIp);
   }
-  if (setSubtitles) {
-    session.cSrtPort = clientPort;
-    serverPort = this->rtpSubtitlesPort;
-    this->subtitlesCh = rtpChannel;
-    if(!session.isTCP) this->setupRTP(this->subtitlesRtpSocket, session.isMulticast, serverPort, this->rtpIp);
+}
+if (setSubtitles) {
+  session.cSrtPort = clientPort;
+  serverPort = this->rtpSubtitlesPort;
+  this->subtitlesCh = rtpChannel;
+  if (this->subtitlesRtpSocket == -1) { // Check if the socket has not been set up
+    this->setupRTP(this->subtitlesRtpSocket, session.isMulticast, serverPort, this->rtpIp);
   }
+}
 
 #ifdef RTSP_VIDEO_NONBLOCK
   if (setVideo && this->rtpVideoTaskHandle == NULL) {
@@ -1053,7 +1052,7 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
  * @param session The RTSP session.
  */
 void RTSPServer::handlePlay(RTSP_Session& session) {
-  this->incrementActiveClients();
+  this->isPlaying = true;
   session.isPlaying = true;
   this->sessions[session.sessionID] = session;
 
@@ -1080,12 +1079,12 @@ void RTSPServer::handlePlay(RTSP_Session& session) {
 void RTSPServer::handlePause(RTSP_Session& session) {
   if (this->sessions.find(session.sessionID) != sessions.end()) {
     this->sessions[session.sessionID].isPlaying = false;
+    updateIsPlaying(); // Update the isPlaying member
     char response[128];
     int len = snprintf(response, sizeof(response),
                        "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                        session.cseq, session.sessionID);
     write(session.sock, response, len);
-    this->decrementActiveClients();
     ESP_LOGD(LOG_TAG, "Session %u is now paused.", session.sessionID);
   } else {
     ESP_LOGE(LOG_TAG, "Session ID %u not found for PAUSE request.", session.sessionID);
@@ -1100,18 +1099,21 @@ void RTSPServer::handlePause(RTSP_Session& session) {
 void RTSPServer::handleTeardown(RTSP_Session& session) {
   if (this->sessions.find(session.sessionID) != sessions.end()) {
     this->sessions.erase(session.sessionID);
+    updateIsPlaying(); // Update the isPlaying member
 
-    if (this->videoRtpSocket != -1) { 
-      close(this->videoRtpSocket); 
-      this->videoRtpSocket = -1; 
-    } 
-    if (this->audioRtpSocket != -1) { 
-      close(this->audioRtpSocket); 
-      this->audioRtpSocket = -1; 
-    } 
-    if (this->subtitlesRtpSocket != -1) { 
-      close(this->subtitlesRtpSocket); 
-      this->subtitlesRtpSocket = -1; 
+    if (!this->isPlaying) { // Check if no session is playing
+      if (this->videoRtpSocket != -1) { 
+        close(this->videoRtpSocket); 
+        this->videoRtpSocket = -1; 
+      } 
+      if (this->audioRtpSocket != -1) { 
+        close(this->audioRtpSocket); 
+        this->audioRtpSocket = -1; 
+      } 
+      if (this->subtitlesRtpSocket != -1) { 
+        close(this->subtitlesRtpSocket); 
+        this->subtitlesRtpSocket = -1; 
+      }
     }
 
     char response[128];
@@ -1119,14 +1121,6 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
                        "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                        session.cseq, session.sessionID);
     write(session.sock, response, len);
-    this->decrementActiveClients();
-    // Check if all clients are disconnected 
-    if (this->getActiveClients() == 0) { 
-      ESP_LOGD(LOG_TAG, "All clients disconnected. Resetting firstClientConnected flag."); 
-      this->firstClientConnected = false; 
-      this->firstClientIsMulticast = false; 
-      this->firstClientIsTCP = false; 
-    }
     ESP_LOGD(LOG_TAG, "RTSP Session %u has been torn down.", session.sessionID);
   } else {
     ESP_LOGE(LOG_TAG, "Session ID %u not found for TEARDOWN request.", session.sessionID);
@@ -1141,11 +1135,9 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
  * @return true if the request was handled successfully, false otherwise.
  */
 bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
-  // Allocate buffer dynamically using ps_malloc
-  const size_t bufferSize = 8092; // Define the buffer size
-  char *buffer = (char *)ps_malloc(bufferSize);
+  char* buffer = (char*)ps_malloc(RTSP_BUFFER_SIZE);
   if (!buffer) {
-    ESP_LOGE(LOG_TAG, "Failed to allocate buffer with ps_malloc");
+    ESP_LOGE(LOG_TAG, "Failed to allocate request buffer");
     return false;
   }
 
@@ -1154,18 +1146,18 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
   int sessSock = sock;
 
   // Read data from socket until end of RTSP header or buffer limit is reached
-  while ((len = recv(sock, buffer + totalLen, bufferSize - totalLen - 1, 0)) > 0) {
+  while ((len = recv(sock, buffer + totalLen, RTSP_BUFFER_SIZE - totalLen - 1, 0)) > 0) {
     totalLen += len;
     if (strstr(buffer, "\r\n\r\n")) {
       break;
     }
-    if (totalLen >= bufferSize) { // Adjusted for null-terminator
+    if (totalLen >= RTSP_BUFFER_SIZE) { // Adjusted for null-terminator
       ESP_LOGE(LOG_TAG, "Request too large for buffer. Total length: %d", totalLen);
       free(buffer); // Free allocated memory
       return false;
     }
   }
-  ESP_LOGD(LOG_TAG, "Request total length: %d", totalLen);
+  //ESP_LOGD(LOG_TAG, "Request total length: %d", totalLen);
 
   if (totalLen <= 0) {
     int err = errno;
@@ -1208,6 +1200,7 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
     return true;
   }
 
+  // Continue if Not RTCP and have data
   int cseq = captureCSeq(buffer);
   if (cseq == -1) {
     ESP_LOGE(LOG_TAG, "CSeq not found in request");
@@ -1262,7 +1255,8 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
       cseq,
       false,
       false,
-      false
+      false,
+      millis() // Initialize lastActiveTime
     };
     sessions[session.sessionID] = session;
     ESP_LOGI(LOG_TAG, "Created new session with ID: %lu", session.sessionID);
@@ -1293,6 +1287,12 @@ bool RTSPServer::handleRTSPRequest(int sock, struct sockaddr_in clientAddr) {
     ESP_LOGW(LOG_TAG, "Unknown RTSP method: %s", buffer);
   }
 
+  // Update session timestamp when found
+  if (sessionExists) {
+    session.lastActiveTime = millis();
+    sessions[session.sessionID] = session;
+  }
+
   free(buffer); // Free allocated memory
   return true;
 }
@@ -1315,7 +1315,7 @@ bool RTSPServer::setNonBlocking(int sock) {
     ESP_LOGE(LOG_TAG, "Failed to set socket to non-blocking mode"); 
     return false;
   } 
-  ESP_LOGI(LOG_TAG, "Socket set to non-blocking mode");
+  ESP_LOGD(LOG_TAG, "Socket set to non-blocking mode");
   return true;
 }
 
@@ -1394,12 +1394,13 @@ void RTSPServer::rtspTask() {
   struct sockaddr_in clientAddr;
   socklen_t addr_len = sizeof(clientAddr);
   fd_set read_fds;
-  int client_sockets[MAX_CLIENTS] = {0};
   int max_sd, activity, client_sock;
-
-  ESP_LOGI(LOG_TAG, "RTSP Server listening on port %d", this->rtspPort);
+  std::vector<int> client_sockets; // Dynamic list for client sockets
 
   while (true) {
+    // Clean up timed out sessions periodically
+    cleanupTimedOutSessions();
+
     // Clear and set the socket set
     FD_ZERO(&read_fds);
     FD_SET(this->rtspSocket, &read_fds);
@@ -1407,23 +1408,24 @@ void RTSPServer::rtspTask() {
 
     uint8_t currentMaxClients = getMaxClients(); // Get the current max clients value
     uint8_t activeClientsCount = 0; // Track the number of active clients
-    
+
     // Add client sockets to set
-    for (int i = 0; i < currentMaxClients; i++) {
-      int sd = client_sockets[i];
-      if (sd > 0) FD_SET(sd, &read_fds);
+    for (int sd : client_sockets) {
+      FD_SET(sd, &read_fds);
       if (sd > max_sd) max_sd = sd;
+      activeClientsCount++; // Count active clients
     }
 
-    // Wait for activity on sockets
-    activity = select(max_sd + 1, &read_fds, NULL, NULL, NULL);
+    // Reduce the timeout value to speed up the loop
+    struct timeval timeout = {0, 50000}; // 50 milliseconds timeout
+    activity = select(max_sd + 1, &read_fds, NULL, NULL, &timeout);
 
     if (activity < 0 && errno != EINTR) {
       ESP_LOGE(LOG_TAG, "Select error");
       continue;
     }
 
-    // Handle new connection
+    // Handle new connection if not at max clients
     if (FD_ISSET(this->rtspSocket, &read_fds) && activeClientsCount < currentMaxClients) {
       client_sock = accept(this->rtspSocket, (struct sockaddr *)&clientAddr, &addr_len);
       if (client_sock < 0) {
@@ -1431,32 +1433,84 @@ void RTSPServer::rtspTask() {
         continue;
       }
 
-      ESP_LOGI(LOG_TAG, "New client connected");
+      // Set the new client socket to non-blocking mode
+      //setNonBlocking(client_sock);
 
-      // Add new client socket to array
-      for (int i = 0; i < currentMaxClients; i++) {
-        if (client_sockets[i] == 0) {
-          client_sockets[i] = client_sock;
-          activeClientsCount++;
-          ESP_LOGI(LOG_TAG, "Added to list of sockets as %d", i);
-          break;
-        }
+      ESP_LOGD(LOG_TAG, "New client connected");
+
+      // Add new client socket to list
+      client_sockets.push_back(client_sock);
+      activeClientsCount++;
+      ESP_LOGD(LOG_TAG, "Added to list of sockets. Total clients: %u", activeClientsCount);
+    } else if (FD_ISSET(this->rtspSocket, &read_fds)) {
+      // Accept connection to send a 503 Service Unavailable response
+      client_sock = accept(this->rtspSocket, (struct sockaddr *)&clientAddr, &addr_len);
+      if (client_sock >= 0) {
+        // Send 503 Service Unavailable response
+        const char *response = "RTSP/1.0 503 Service Unavailable\r\n"
+                               "CSeq: 1\r\n"
+                               "Content-Length: 0\r\n\r\n";
+        send(client_sock, response, strlen(response), 0);
+        close(client_sock);
+        ESP_LOGW(LOG_TAG, "Max clients reached. Sent 503 Service Unavailable response.");
       }
     }
 
     // Handle client sockets
-    for (int i = 0; i < currentMaxClients; i++) {
-      int sd = client_sockets[i];
+    auto it = client_sockets.begin();
+    while (it != client_sockets.end()) {
+      int sd = *it;
 
       if (FD_ISSET(sd, &read_fds)) {
         // Handle RTSP request
         bool keepConnection = handleRTSPRequest(sd, clientAddr);
         if (!keepConnection) {
           close(sd);
-          client_sockets[i] = 0;
-          activeClientsCount--;
+          it = client_sockets.erase(it);
+          activeClientsCount--; // Decrement active clients count
+          ESP_LOGD(LOG_TAG, "Client disconnected. Total clients: %u", activeClientsCount);
+
+          // Check if all clients are disconnected and reset first client flags
+          if (activeClientsCount == 0) {
+            ESP_LOGD(LOG_TAG, "All clients disconnected. Resetting firstClientConnected flag.");
+            isPlaying = false;
+            if (this->videoRtpSocket != -1) { 
+              close(this->videoRtpSocket); 
+              this->videoRtpSocket = -1; 
+            } 
+            if (this->audioRtpSocket != -1) { 
+              close(this->audioRtpSocket); 
+              this->audioRtpSocket = -1; 
+            } 
+            if (this->subtitlesRtpSocket != -1) { 
+              close(this->subtitlesRtpSocket); 
+              this->subtitlesRtpSocket = -1; 
+            }
+            firstClientConnected = false;
+            firstClientIsMulticast = false;
+            firstClientIsTCP = false;
+          }
+          continue;
         }
       }
+      ++it;
+    }
+  }
+}
+
+/**
+ * @brief Cleans up timed out sessions.
+ */
+void RTSPServer::cleanupTimedOutSessions() {
+  uint32_t currentTime = millis();
+  auto it = sessions.begin();
+  while (it != sessions.end()) {
+    if (!it->second.isPlaying && (currentTime - it->second.lastActiveTime > SESSION_TIMEOUT_MS)) {
+      ESP_LOGD(LOG_TAG, "Inactive session %u timed out, cleaning up", it->first);
+      handleTeardown(it->second);
+      it = sessions.erase(it);
+    } else {
+      ++it;
     }
   }
 }
