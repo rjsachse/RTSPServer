@@ -332,57 +332,67 @@ void RTSPServer::sendRtpSubtitles(const char* data, size_t len, int sock, IPAddr
  * @param useTCP Indicates if TCP is used.
  */
 void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP) {
-
   const int RtpHeaderSize = 12; // RTP header size
-  int RtpPacketSize = len + RtpHeaderSize;
+  const int MAX_FRAGMENT_SIZE = 1024; // Adjust based on your requirements
+  uint32_t audioLen = len;
 
-  uint8_t packet[1100];
-  memset(packet, 0x00, sizeof(packet));
+  size_t fragmentOffset = 0;
+  while (fragmentOffset < audioLen) {
+    int fragmentLen = MAX_FRAGMENT_SIZE;
+    if (fragmentLen + fragmentOffset > audioLen) {
+      fragmentLen = audioLen - fragmentOffset;
+    }
 
-  // If TCP, we need these first 4 bytes
-  packet[0] = '$'; // Magic number 
-  packet[1] = this->audioCh; // Channel number for RTP (1 for audio)
-  packet[2] = (RtpPacketSize >> 8) & 0xFF; // Packet length high byte 
-  packet[3] = RtpPacketSize & 0xFF; // Packet length low byte
-  
-  // RTP header
-  packet[4] = 0x80; // Version: 2, Padding: 0, Extension: 0, CSRC Count: 0
-  packet[5] = 0x61 | 0x80;  // Dynamic payload type (97) and marker bit
-  packet[6] = (this->audioSequenceNumber >> 8) & 0xFF; // Sequence Number (high byte)
-  packet[7] = this->audioSequenceNumber & 0xFF; // Sequence Number (low byte)
-  packet[8] = (this->audioTimestamp >> 24) & 0xFF; // Timestamp (high byte)
-  packet[9] = (this->audioTimestamp >> 16) & 0xFF; // Timestamp (next byte)
-  packet[10] = (this->audioTimestamp >> 8) & 0xFF; // Timestamp (next byte)
-  packet[11] = this->audioTimestamp & 0xFF; // Timestamp (low byte)
-  packet[12] = (this->audioSSRC >> 24) & 0xFF; // SSRC (high byte)
-  packet[13] = (this->audioSSRC >> 16) & 0xFF; // SSRC (next byte)
-  packet[14] = (this->audioSSRC >> 8) & 0xFF; // SSRC (next byte)
-  packet[15] = this->audioSSRC & 0xFF; // SSRC (low byte)
+    int RtpPacketSize = fragmentLen + RtpHeaderSize;
+    uint8_t packet[2048]; // Adjust the size based on MAX_FRAGMENT_SIZE
+    memset(packet, 0x00, sizeof(packet));
 
-  int packetOffset = RtpHeaderSize + 4;
+    // If TCP, we need these first 4 bytes
+    packet[0] = '$'; // Magic number 
+    packet[1] = this->audioCh; // Channel number for RTP (1 for audio)
+    packet[2] = (RtpPacketSize >> 8) & 0xFF; // Packet length high byte 
+    packet[3] = RtpPacketSize & 0xFF; // Packet length low byte
 
-  // Convert audio data from little-endian to big-endian and copy to the packet
-  for (size_t i = 0; i < len / 2; i++) {
-    packet[packetOffset++] = (data[i] >> 8) & 0xFF; // High byte
-    packet[packetOffset++] = data[i] & 0xFF; // Low byte
+    // RTP header
+    packet[4] = 0x80; // Version: 2, Padding: 0, Extension: 0, CSRC Count: 0
+    packet[5] = 0x61 | 0x80;  // Dynamic payload type (97) and marker bit
+    packet[6] = (this->audioSequenceNumber >> 8) & 0xFF; // Sequence Number (high byte)
+    packet[7] = this->audioSequenceNumber & 0xFF; // Sequence Number (low byte)
+    packet[8] = (this->audioTimestamp >> 24) & 0xFF; // Timestamp (high byte)
+    packet[9] = (this->audioTimestamp >> 16) & 0xFF; // Timestamp (next byte)
+    packet[10] = (this->audioTimestamp >> 8) & 0xFF; // Timestamp (next byte)
+    packet[11] = this->audioTimestamp & 0xFF; // Timestamp (low byte)
+    packet[12] = (this->audioSSRC >> 24) & 0xFF; // SSRC (high byte)
+    packet[13] = (this->audioSSRC >> 16) & 0xFF; // SSRC (next byte)
+    packet[14] = (this->audioSSRC >> 8) & 0xFF; // SSRC (next byte)
+    packet[15] = this->audioSSRC & 0xFF; // SSRC (low byte)
+
+    int packetOffset = RtpHeaderSize + 4;
+
+    // Convert audio data from little-endian to big-endian and copy to the packet
+    for (size_t i = 0; i < fragmentLen / 2; i++) {
+      packet[packetOffset++] = (data[fragmentOffset / 2 + i] >> 8) & 0xFF; // High byte
+      packet[packetOffset++] = data[fragmentOffset / 2 + i] & 0xFF; // Low byte
+    }
+
+    // Send packet using TCP or UDP
+    if (useTCP) {
+      sendTcpPacket(packet, packetOffset, sock);
+    } else {
+      struct sockaddr_in client_addr;
+      memset(&client_addr, 0, sizeof(client_addr));
+      client_addr.sin_family = AF_INET;
+      client_addr.sin_port = htons(sendRtpPort);
+      inet_aton(clientIP.toString().c_str(), &client_addr.sin_addr);
+
+      int rtpSocket = isMulticast ? this->audioMulticastSocket : this->audioUnicastSocket;
+
+      sendto(rtpSocket, packet + 4, packetOffset - 4, 0, (struct sockaddr*)&client_addr, sizeof(client_addr));
+    }
+    fragmentOffset += fragmentLen;
+    this->audioSequenceNumber++;
+    this->audioTimestamp += fragmentLen / 2; // Convert fragment length to number of samples
   }
-
-  // Send packet using TCP or UDP
-  if (useTCP) {
-    sendTcpPacket(packet, packetOffset, sock);
-  } else {
-    // Using lwip/sockets.h
-    struct sockaddr_in client_addr;
-    memset(&client_addr, 0, sizeof(client_addr));
-    client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(sendRtpPort);
-    inet_aton(clientIP.toString().c_str(), &client_addr.sin_addr);
-
-    sendto(this->audioRtpSocket, packet + 4, packetOffset - 4, 0, (struct sockaddr*)&client_addr, sizeof(client_addr));
-  }
-  this->audioSequenceNumber++;
-  // Increment the timestamp based on the length of the audio data 
-  this->audioTimestamp += len / 2; // Convert length to number of samples
 }
 
 /**
