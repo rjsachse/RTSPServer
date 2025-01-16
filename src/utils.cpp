@@ -21,11 +21,11 @@ void RTSPServer::startSubtitlesTimer(esp_timer_cb_t userCallback) {
 void RTSPServer::setMaxClients(uint8_t newMaxClients) {
   if (xSemaphoreTake(maxClientsMutex, portMAX_DELAY) == pdTRUE) {
     if (newMaxClients <= MAX_CLIENTS) {
-      maxClients = newMaxClients;
-      ESP_LOGI(LOG_TAG, "Max clients updated to: %d", maxClients);
+      this->maxClients = newMaxClients;
+      ESP_LOGI(LOG_TAG, "Max clients updated to: %d", this->maxClients);
     } else {
       ESP_LOGW(LOG_TAG, "Requested max clients (%d) exceeds the hardcoded limit (%d). Max clients set to %d.", newMaxClients, MAX_CLIENTS, MAX_CLIENTS);
-      maxClients = MAX_CLIENTS;
+      this->maxClients = MAX_CLIENTS;
     }
     xSemaphoreGive(maxClientsMutex);
   } else {
@@ -36,12 +36,34 @@ void RTSPServer::setMaxClients(uint8_t newMaxClients) {
 uint8_t RTSPServer::getMaxClients() {
   uint8_t clients = 0;
   if (xSemaphoreTake(maxClientsMutex, portMAX_DELAY) == pdTRUE) {
-    clients = maxClients;
+    clients = this->maxClients;
     xSemaphoreGive(maxClientsMutex);
   } else {
     ESP_LOGE(LOG_TAG, "Failed to acquire maxClients mutex");
   }
   return clients;
+}
+
+void incrementActiveRTSPClients() {
+  if (this->activeRTSPClients < 255) {
+    this->activeRTSPClients++;
+    ESP_LOGI(LOG_TAG, "Active RTSP clients count incremented: %d", this->activeRTSPClients);
+  } else {
+    ESP_LOGW(LOG_TAG, "Max RTSP clients reached: %d", 255);
+  }
+}
+
+void decrementActiveRTSPClients() {
+  if (this->activeRTSPClients > 0) {
+    this->activeRTSPClients--;
+    ESP_LOGI(LOG_TAG, "Active RTSP clients count decremented: %d", this->activeRTSPClients);
+  } else {
+    ESP_LOGW(LOG_TAG, "Min RTSP clients already: %d", 0);
+  }
+}
+
+uint8_t RTSPServer::getActiveRTSPClients() {
+  return this->activeRTSPClients;
 }
 
 void RTSPServer::updateIsPlayingStatus() {

@@ -270,6 +270,12 @@ private:
    * @return Active clients.
    */
   uint8_t getActiveClients();
+  
+  void incrementActiveRTSPClients();
+
+  void decrementActiveRTSPClients();
+
+  uint8_t getActiveRTSPClients();
 
   void updateIsPlayingStatus(); 
   

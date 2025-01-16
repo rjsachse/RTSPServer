@@ -317,7 +317,6 @@ void RTSPServer::rtspTask() {
     max_sd = this->rtspSocket;
 
     uint8_t currentMaxClients = getMaxClients(); // Get the current max clients value
-    uint8_t activeClientsCount = 0; // Track the number of active clients
 
     // Add client sockets to set
     for (int i = 0; i < currentMaxClients; i++) {
@@ -336,7 +335,7 @@ void RTSPServer::rtspTask() {
 
     // Handle new connection
     if (FD_ISSET(this->rtspSocket, &read_fds)) {
-      if (activeClientsCount >= currentMaxClients) {
+      if (getActiveRTSPClients() >= currentMaxClients) {
         client_sock = accept(this->rtspSocket, (struct sockaddr *)&clientAddr, &addr_len);
         if (client_sock < 0) {
           ESP_LOGE(LOG_TAG, "Accept error");
@@ -377,7 +376,7 @@ void RTSPServer::rtspTask() {
       for (int i = 0; i < currentMaxClients; i++) {
         if (client_sockets[i] == 0) {
           client_sockets[i] = client_sock;
-          activeClientsCount++;
+          incrementActiveRTSPClients();
           ESP_LOGI(LOG_TAG, "Added to list of sockets as %d", i);
           break;
         }
@@ -401,12 +400,8 @@ void RTSPServer::rtspTask() {
           // Handle RTSP request
           bool keepConnection = handleRTSPRequest(*session);
           if (!keepConnection) {
-            close(sd);
-            client_sockets[i] = 0;
-            sessions.erase(session->sessionID); // Remove session when client disconnects
-            activeClientsCount--;
-            // Check if all clients have disconnected 
-            if (activeClientsCount == 0) {
+             // Check if all clients have disconnected 
+            if (getActiveRTSPClients() == 1) {
               setIsPlaying(false);
               closeSockets();
               ESP_LOGD(LOG_TAG, "All clients disconnected. Resetting firstClientConnected flag."); 
@@ -414,6 +409,10 @@ void RTSPServer::rtspTask() {
               this->firstClientIsMulticast = false; 
               this->firstClientIsTCP = false; 
             }
+            close(sd);
+            client_sockets[i] = 0;
+            sessions.erase(session->sessionID); // Remove session when client disconnects
+            decrementActiveRTSPClients();
           }
         }
       }
