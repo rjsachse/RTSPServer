@@ -5,7 +5,6 @@
 #include "lwip/sockets.h"
 #include <esp_log.h>
 #include <map>
-//#include <Arduino.h>  // Include the Arduino header for String type
 
 #define MAX_RTSP_BUFFER (512 * 1024)
 #define RTP_STACK_SIZE (1024 * 4)
@@ -13,6 +12,12 @@
 #define RTSP_STACK_SIZE (1024 * 8)
 #define RTSP_PRI 10
 #define MAX_CLIENTS 5 // max rtsp clients
+
+#define RTSP_BUFFER_SIZE 8092
+
+// User defined options in sketch
+//#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming, Create a separate task for video streaming so does not block main sketch video task
 
 /**
  * @brief Structure representing an RTSP session.
@@ -47,19 +52,6 @@ public:
     AUDIO_AND_SUBTITLES,
     VIDEO_AUDIO_SUBTITLES,
     NONE,
-  };
-
-  /**
-   * @brief Structure to hold parameters for the client task.
-   * 
-   * This structure contains the necessary information to handle an RTSP client
-   * connection, including the RTSP server instance, client socket, and client
-   * address.
-   */
-  struct ClientTaskParams {
-    RTSPServer* server;         ///< Pointer to the RTSP server instance
-    int clientSock;             ///< The socket file descriptor for the client
-    struct sockaddr_in clientAddr; ///< The client's address information
   };
 
   RTSPServer();  // Default constructor
@@ -160,12 +152,14 @@ public:
 
 private:
   int rtspSocket;
-  int videoRtpSocket;
-  int audioRtpSocket;
-  int subtitlesRtpSocket;
+  int videoUnicastSocket; 
+  int audioUnicastSocket; 
+  int subtitlesUnicastSocket; 
+  int videoMulticastSocket; 
+  int audioMulticastSocket; 
+  int subtitlesMulticastSocket;
   uint8_t activeRTSPClients; 
   uint8_t maxClients;
-  SemaphoreHandle_t clientsMutex;  // Mutex for protecting access
   TaskHandle_t rtpVideoTaskHandle;
   TaskHandle_t rtspTaskHandle;
   std::map<uint32_t, RTSP_Session> sessions;
@@ -194,13 +188,16 @@ private:
   bool isVideo;
   bool isAudio;
   bool isSubtitles;
+  bool isPlaying;
   bool firstClientConnected; 
   bool firstClientIsMulticast; 
   bool firstClientIsTCP;
   esp_timer_handle_t sendSubtitlesTimer;
+  SemaphoreHandle_t isPlayingMutex;  // Mutex for protecting access
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
   SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
 
+  void closeSockets();
 
   /**
    * @brief Sets up RTP streaming.
@@ -209,7 +206,7 @@ private:
    * @param rtpPort The RTP port to use.
    * @param rtpIp The RTP IP address.
    */
-  void setupRTP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());
+  void checkAndSetupUDP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());
 
   /**
    * @brief Sends RTP subtitles.
@@ -220,7 +217,7 @@ private:
    * @param sendRtpPort RTP port to use for sending.
    * @param useTCP Indicates if TCP is used.
    */
-  void sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP);
+  void sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
 
   /**
    * @brief Sends RTP audio.
@@ -231,7 +228,7 @@ private:
    * @param sendRtpPort RTP port to use for sending.
    * @param useTCP Indicates if TCP is used.
    */
-  void sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP);
+  void sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
 
   /**
    * @brief Sends an RTP frame.
@@ -245,7 +242,7 @@ private:
    * @param sendRtpPort RTP port to use for sending.
    * @param useTCP Indicates if TCP is used.
    */
-  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP);
+  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
 
   /**
    * @brief Task wrapper for RTP video.
@@ -274,15 +271,11 @@ private:
    */
   uint8_t getActiveClients();
 
-  /**
-   * @brief Increments the count of active clients.
-   */
-  void incrementActiveClients();
-
-  /**
-   * @brief Decrements the count of active clients.
-   */
-  void decrementActiveClients();
+  void updateIsPlayingStatus(); 
+  
+  void setIsPlaying(bool playing); 
+  
+  bool getIsPlaying() const;
 
   /**
    * @brief Captures the CSeq from an RTSP request.
@@ -355,7 +348,7 @@ private:
    * @return true if the request was handled successfully, false otherwise.
    */
   bool handleRTSPRequest(int sockfd, struct sockaddr_in clientAddr);
-
+  bool handleRTSPRequest(RTSP_Session& session);
   /**
    * @brief Sets a socket to non-blocking mode.
    * @param sockfd The socket file descriptor.
@@ -383,4 +376,3 @@ private:
 };
 
 #endif // RTSP_SERVER_H
-
