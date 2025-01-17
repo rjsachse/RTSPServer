@@ -198,11 +198,6 @@ bool RTSPServer::reinit() {
   return init();  // Reinitialize the RTSP server
 }
 
-
-
-
-
-
 void RTSPServer::closeSockets() {
   if (videoUnicastSocket != -1) {
     close(videoUnicastSocket);

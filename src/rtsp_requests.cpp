@@ -309,7 +309,6 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
  * @return true if the request was handled successfully, false otherwise.
  */
 bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
-  int sock = session.sock;
   char *buffer = (char *)ps_malloc(RTSP_BUFFER_SIZE);
   if (!buffer) {
     ESP_LOGE(LOG_TAG, "Failed to allocate buffer with ps_malloc");
@@ -320,7 +319,7 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
   int len = 0;
 
   // Read data from socket until end of RTSP header or buffer limit is reached
-  while ((len = recv(sock, buffer + totalLen, RTSP_BUFFER_SIZE - totalLen - 1, 0)) > 0) {
+  while ((len = recv(session.sock, buffer + totalLen, RTSP_BUFFER_SIZE - totalLen - 1, 0)) > 0) {
     totalLen += len;
     if (strstr(buffer, "\r\n\r\n")) {
       break;
@@ -371,26 +370,17 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
   int cseq = captureCSeq(buffer);
   if (cseq == -1) {
     ESP_LOGE(LOG_TAG, "CSeq not found in request");
-    write(sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
+    write(session.sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
     free(buffer); // Free allocated memory
     return true;
   }
 
   session.cseq = cseq;
 
-  // Extract session ID from the request
-  char* sessionIDStr = strstr(buffer, "Session: ");
-  if (sessionIDStr) {
-    sessionIDStr += 9;
-    char* sessionIDEnd = strstr(sessionIDStr, "\r\n");
-    if (sessionIDEnd) {
-      *sessionIDEnd = 0;
-      uint32_t sessionID = strtoul(sessionIDStr, NULL, 10);
-      *sessionIDEnd = '\r'; // Restore the character
-      if (sessions.find(sessionID) != sessions.end()) {
-        session.sessionID = sessionID;
-      }
-    }
+  // Extract session ID using the provided function
+  uint32_t sessionID = extractSessionID(buffer);
+  if (sessionID != 0 && sessions.find(sessionID) != sessions.end()) {
+    session.sessionID = sessionID;
   }
 
   // Handle different RTSP methods

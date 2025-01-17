@@ -44,7 +44,7 @@ uint8_t RTSPServer::getMaxClients() {
   return clients;
 }
 
-void incrementActiveRTSPClients() {
+void RTSPServer::incrementActiveRTSPClients() {
   if (this->activeRTSPClients < 255) {
     this->activeRTSPClients++;
     ESP_LOGI(LOG_TAG, "Active RTSP clients count incremented: %d", this->activeRTSPClients);
@@ -53,7 +53,7 @@ void incrementActiveRTSPClients() {
   }
 }
 
-void decrementActiveRTSPClients() {
+void RTSPServer::decrementActiveRTSPClients() {
   if (this->activeRTSPClients > 0) {
     this->activeRTSPClients--;
     ESP_LOGI(LOG_TAG, "Active RTSP clients count decremented: %d", this->activeRTSPClients);
