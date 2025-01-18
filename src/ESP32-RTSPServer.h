@@ -36,7 +36,6 @@
 struct RTSP_Session {
   uint32_t sessionID;
   int sock;
-  IPAddress clientIP;
   int cseq;
   uint16_t cVideoPort;
   uint16_t cAudioPort;
@@ -145,11 +144,11 @@ private:
 
   void checkAndSetupUDP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());  // Defined in network.cpp
 
-  void sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpSubtitles(const char* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
 
-  void sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpAudio(const int16_t* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
 
-  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
 
   static void rtpVideoTaskWrapper(void* pvParameters);  // Defined in rtp.cpp
 

@@ -304,7 +304,6 @@ void RTSPServer::rtspTask() {
       RTSP_Session session = {
         esp_random(),
         client_sock,
-        IPAddress(clientAddr.sin_addr.s_addr),
         0,
         0,
         0,
