@@ -38,6 +38,10 @@ RTSPServer rtspServer;
 // Define HAVE_AUDIO to include audio-related code
 #define HAVE_AUDIO // Comment out if don't have audio
 
+//#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming by creating a separate task for video streaming, preventing it from blocking the main sketch.
+//#define RTSP_LOGGING_ENABLED //Also enable "Core Debug Level" to "Info" in Tools -> Core Debug Level to enable logging
+
 #ifdef HAVE_AUDIO
 #include <ESP_I2S.h>
 // I2SClass object for I2S communication
@@ -330,6 +334,8 @@ void setup() {
 
   // Or a callback to send the subtitles with the callback function 
   rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
+
+  rtspServer.maxRTSPClients = 5; // Set the maximum number of RTSP Multicast clients else enable OVERRIDE_RTSP_SINGLE_CLIENT_MODE to allow multiple clients for all transports eg. TCP, UDP, Multicast
 
   // Initialize the RTSP server
   /**
