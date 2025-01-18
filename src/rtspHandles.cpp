@@ -103,7 +103,7 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
                             (!firstClientIsMulticast && (session.isMulticast || session.isTCP != firstClientIsTCP));
 
     if (rejectConnection) {
-      ESP_LOGW(LOG_TAG, "Rejecting connection because it does not match the first client's connection type");
+      RTSP_LOGW(LOG_TAG, "Rejecting connection because it does not match the first client's connection type");
       char response[512];
       snprintf(response, sizeof(response),
                "RTSP/1.0 461 Unsupported Transport\r\n"
@@ -111,7 +111,7 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
                "%s\r\n\r\n",
                session.cseq, dateHeader());
       if (write(session.sock, response, strlen(response)) < 0) {
-        ESP_LOGE(LOG_TAG, "Failed to send rejection response to client.");
+        RTSP_LOGE(LOG_TAG, "Failed to send rejection response to client.");
       }
       return;
     }
@@ -136,12 +136,12 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
       if (interleaveStart && interleaveEnd) {
         *interleaveEnd = 0;
         rtpChannel = atoi(interleaveStart);
-        ESP_LOGD(LOG_TAG, "Extracted RTP channel: %d", rtpChannel);
+        RTSP_LOGD(LOG_TAG, "Extracted RTP channel: %d", rtpChannel);
       } else {
-        ESP_LOGE(LOG_TAG, "Failed to find interleave end");
+        RTSP_LOGE(LOG_TAG, "Failed to find interleave end");
       }
     } else {
-      ESP_LOGE(LOG_TAG, "Failed to find interleaved=");
+      RTSP_LOGE(LOG_TAG, "Failed to find interleaved=");
     }
   } else if (!session.isMulticast) {
     char* rtpPortStart = strstr(request, "client_port=");
@@ -151,12 +151,12 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
       if (rtpPortStart && rtpPortEnd) {
         *rtpPortEnd = 0;
         clientPort = atoi(rtpPortStart);
-        ESP_LOGD(LOG_TAG, "Extracted client port: %d", clientPort);
+        RTSP_LOGD(LOG_TAG, "Extracted client port: %d", clientPort);
       } else {
-        ESP_LOGE(LOG_TAG, "Failed to find client port end");
+        RTSP_LOGE(LOG_TAG, "Failed to find client port end");
       }
     } else {
-      ESP_LOGE(LOG_TAG, "Failed to find client_port=");
+      RTSP_LOGE(LOG_TAG, "Failed to find client_port=");
     }
   }
 
@@ -212,7 +212,7 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
 
   char* response = (char*)malloc(512);
   if (response == NULL) {
-    ESP_LOGE(LOG_TAG, "Failed to allocate memory");
+    RTSP_LOGE(LOG_TAG, "Failed to allocate memory");
     return;
   }
 
@@ -279,7 +279,7 @@ void RTSPServer::handlePause(RTSP_Session& session) {
                      "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                      session.cseq, session.sessionID);
   write(session.sock, response, len);
-  ESP_LOGD(LOG_TAG, "Session %u is now paused.", session.sessionID);
+  RTSP_LOGD(LOG_TAG, "Session %u is now paused.", session.sessionID);
 }
 
 /**
@@ -298,7 +298,7 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
                      session.cseq, session.sessionID);
   write(session.sock, response, len);
 
-  ESP_LOGD(LOG_TAG, "RTSP Session %u has been torn down.", session.sessionID);
+  RTSP_LOGD(LOG_TAG, "RTSP Session %u has been torn down.", session.sessionID);
 }
 
 /**
@@ -311,7 +311,7 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
 bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
   char *buffer = (char *)ps_malloc(RTSP_BUFFER_SIZE);
   if (!buffer) {
-    ESP_LOGE(LOG_TAG, "Failed to allocate buffer with ps_malloc");
+    RTSP_LOGE(LOG_TAG, "Failed to allocate buffer with ps_malloc");
     return false;
   }
 
@@ -325,12 +325,11 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
       break;
     }
     if (totalLen >= RTSP_BUFFER_SIZE) { // Adjusted for null-terminator
-      ESP_LOGE(LOG_TAG, "Request too large for buffer. Total length: %d", totalLen);
+      RTSP_LOGE(LOG_TAG, "Request too large for buffer. Total length: %d", totalLen);
       free(buffer); // Free allocated memory
       return false;
     }
   }
-  //ESP_LOGD(LOG_TAG, "Request total length: %d", totalLen);
 
   if (totalLen <= 0) {
     int err = errno;
@@ -339,11 +338,11 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
       return true;
     } else if (err == ECONNRESET || err == ENOTCONN) {
       // Handle teardown when connection is reset or not connected based on client IP
-      ESP_LOGD(LOG_TAG, "HandleTeardown");
+      RTSP_LOGD(LOG_TAG, "HandleTeardown");
       this->handleTeardown(session);
       return false;
     } else {
-      ESP_LOGE(LOG_TAG, "Error reading from socket, error: %d", err);
+      RTSP_LOGE(LOG_TAG, "Error reading from socket, error: %d", err);
       return false;
     }
   }
@@ -369,7 +368,7 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
 
   int cseq = captureCSeq(buffer);
   if (cseq == -1) {
-    ESP_LOGE(LOG_TAG, "CSeq not found in request");
+    RTSP_LOGE(LOG_TAG, "CSeq not found in request");
     write(session.sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
     free(buffer); // Free allocated memory
     return true;
@@ -385,27 +384,27 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
 
   // Handle different RTSP methods
   if (strncmp(buffer, "OPTIONS", 7) == 0) {
-    ESP_LOGD(LOG_TAG, "HandleOptions");
+    RTSP_LOGD(LOG_TAG, "HandleOptions");
     this->handleOptions(buffer, session);
   } else if (strncmp(buffer, "DESCRIBE", 8) == 0) {
-    ESP_LOGD(LOG_TAG, "HandleDescribe");
+    RTSP_LOGD(LOG_TAG, "HandleDescribe");
     this->handleDescribe(session);
   } else if (strncmp(buffer, "SETUP", 5) == 0) {
-    ESP_LOGD(LOG_TAG, "HandleSetup");
+    RTSP_LOGD(LOG_TAG, "HandleSetup");
     this->handleSetup(buffer, session);
   } else if (strncmp(buffer, "PLAY", 4) == 0) {
-    ESP_LOGD(LOG_TAG, "HandlePlay");
+    RTSP_LOGD(LOG_TAG, "HandlePlay");
     this->handlePlay(session);
   } else if (strncmp(buffer, "TEARDOWN", 8) == 0) {
-    ESP_LOGD(LOG_TAG, "HandleTeardown");
+    RTSP_LOGD(LOG_TAG, "HandleTeardown");
     this->handleTeardown(session);
     free(buffer); // Free allocated memory
     return false;
   } else if (strncmp(buffer, "PAUSE", 5) == 0) {
-    ESP_LOGD(LOG_TAG, "HandlePause");
+    RTSP_LOGD(LOG_TAG, "HandlePause");
     this->handlePause(session);
   } else {
-    ESP_LOGW(LOG_TAG, "Unknown RTSP method: %s", buffer);
+    RTSP_LOGW(LOG_TAG, "Unknown RTSP method: %s", buffer);
   }
 
   free(buffer); // Free allocated memory

@@ -1,18 +1,10 @@
 #include "ESP32-RTSPServer.h"
 
-/**
- * @brief Wrapper for the RTP video task.
- * 
- * @param pvParameters Task parameters.
- */
 void RTSPServer::rtpVideoTaskWrapper(void* pvParameters) {
   RTSPServer* server = static_cast<RTSPServer*>(pvParameters);
   server->rtpVideoTask();
 }
 
-/**
- * @brief Task for handling RTP video streaming.
- */
 void RTSPServer::rtpVideoTask() {
   while (true) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -36,17 +28,24 @@ void RTSPServer::rtpVideoTask() {
   vTaskDelete(NULL);
 }
 
-/**
- * @brief Sends an RTSP frame.
- * 
- * @param data Pointer to the frame data.
- * @param len Length of the frame data.
- * @param quality Quality of the frame.
- * @param width Width of the frame.
- * @param height Height of the frame.
- */
 void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height) {
   this->rtpFrameSent = false;
+  static uint32_t lastSendTime = millis(); // Track the last time a frame was sent
+  uint32_t currentTime = millis(); // Get the current time in milliseconds
+
+  // Calculate the actual time elapsed since the last frame was sent
+  uint32_t actualElapsedTime = currentTime - lastSendTime;
+  // Increment the timestamp based on the actual elapsed time
+  this->videoTimestamp += (actualElapsedTime * 90000) / 1000;   // Convert milliseconds to 90kHz units
+
+  // Work out the RTP sent FPS to use for subtitles
+  this->rtpFrameCount++; 
+  // Update FPS every second 
+  if (currentTime - this->lastRtpFPSUpdateTime >= 1000) { 
+    this->rtpFps = this->rtpFrameCount; // Store the current FPS 
+    this->rtpFrameCount = 0; // Reset the frame count for the next second 
+    this->lastRtpFPSUpdateTime = currentTime; // Update the last FPS update time 
+  }
 #ifdef RTSP_VIDEO_NONBLOCK
   this->vQuality = quality;
   this->vWidth = width;
@@ -54,8 +53,7 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
   if (!this->rtspStreamBufferSize && this->rtspStreamBuffer != NULL) {
     memcpy(this->rtspStreamBuffer, data, len);
     this->rtspStreamBufferSize = len;
-    xTaskNotifyGive(rtpVideoTaskHandle); // Signal frame ready for RTSP
-    //xSemaphoreGive(this->rtspFrameSemaphore); // Signal frame ready for RTSP
+    xTaskNotifyGive(rtpVideoTaskHandle);
   }
 #else
   bool multicastSent = false;
@@ -73,15 +71,10 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
     }
   }
   this->rtpFrameSent = true;
+  lastSendTime = currentTime;
 #endif
 }
 
-/**
- * @brief Sends RTSP audio data.
- * 
- * @param data Pointer to the audio data.
- * @param len Length of the audio data.
- */
 void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
   this->rtpAudioSent = false;
   bool multicastSent = false;
@@ -101,12 +94,6 @@ void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
   this->rtpAudioSent = true;
 }
 
-/**
- * @brief Sends RTSP subtitles.
- * 
- * @param data Pointer to the subtitles data.
- * @param len Length of the subtitles data.
- */
 void RTSPServer::sendRTSPSubtitles(char* data, size_t len) {
   this->rtpSubtitlesSent = false;
   bool multicastSent = false;
@@ -126,39 +113,7 @@ void RTSPServer::sendRTSPSubtitles(char* data, size_t len) {
   this->rtpSubtitlesSent = true;
 }
 
-/**
- * @brief Sends an RTP frame.
- * 
- * @param data Pointer to the frame data.
- * @param len Length of the frame data.
- * @param quality Quality of the frame.
- * @param width Width of the frame.
- * @param height Height of the frame.
- * @param sock Socket to use for sending.
- * @param clientIP Client IP address.
- * @param sendRtpPort RTP port to use for sending.
- * @param useTCP Indicates if TCP is used.
- */
-#define USE_DIRECT_IP // Comment out this line to use getpeername() instead
-
 void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
-  static uint32_t lastSendTime = millis(); // Track the last time a frame was sent
-  uint32_t currentTime = millis(); // Get the current time in milliseconds
-
-  // Calculate the actual time elapsed since the last frame was sent
-  uint32_t actualElapsedTime = currentTime - lastSendTime;
-  // Increment the timestamp based on the actual elapsed time
-  this->videoTimestamp += (actualElapsedTime * 90000) / 1000;   // Convert milliseconds to 90kHz units
-
-  // Work out the RTP sent FPS to use for subtitles
-  this->rtpFrameCount++; 
-  // Update FPS every second 
-  if (currentTime - this->lastRtpFPSUpdateTime >= 1000) { 
-    this->rtpFps = this->rtpFrameCount; // Store the current FPS 
-    this->rtpFrameCount = 0; // Reset the frame count for the next second 
-    this->lastRtpFPSUpdateTime = currentTime; // Update the last FPS update time 
-  }
-
   const int RtpHeaderSize = 20;
   const int MAX_FRAGMENT_SIZE = 1438;
   uint32_t jpegLen = len;
@@ -219,23 +174,17 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
       struct sockaddr_in client_addr;
       memset(&client_addr, 0, sizeof(client_addr));
       client_addr.sin_family = AF_INET;
-      client_addr.sin_port = htons(sendRtpPort);
-
-#ifdef USE_DIRECT_IP
-      // Use the stored client IP directly for both unicast and multicast
-      inet_aton(clientIP.toString().c_str(), &client_addr.sin_addr);
-#else
       // Determine IP address based on whether it's multicast or unicast
       if (isMulticast) {
         inet_aton(this->rtpIp.toString().c_str(), &client_addr.sin_addr);
       } else {
         socklen_t addrLen = sizeof(client_addr);
         if (getpeername(sock, (struct sockaddr*)&client_addr, &addrLen) == -1) {
-          ESP_LOGE(LOG_TAG, "Failed to get peer IP address");
+          RTSP_LOGE(LOG_TAG, "Failed to get peer IP address");
           return;
         }
       }
-#endif
+      client_addr.sin_port = htons(sendRtpPort);
 
       int rtpSocket = isMulticast ? this->videoMulticastSocket : this->videoUnicastSocket;
 
@@ -244,22 +193,11 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
     fragmentOffset += fragmentLen;
     this->videoSequenceNumber++;
   }
-  lastSendTime = currentTime;
 }
 
-/**
- * @brief Sends RTP audio data.
- * 
- * @param data Pointer to the audio data.
- * @param len Length of the audio data.
- * @param sock Socket to use for sending.
- * @param clientIP Client IP address.
- * @param sendRtpPort RTP port to use for sending.
- * @param useTCP Indicates if TCP is used.
- */
 void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
   const int RtpHeaderSize = 12; // RTP header size
-  const int MAX_FRAGMENT_SIZE = 1024; // Adjust based on your requirements
+  const int MAX_FRAGMENT_SIZE = 1446; // Adjust based on your requirements
   uint32_t audioLen = len;
 
   size_t fragmentOffset = 0;
@@ -308,23 +246,17 @@ void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddre
       struct sockaddr_in client_addr;
       memset(&client_addr, 0, sizeof(client_addr));
       client_addr.sin_family = AF_INET;
-      client_addr.sin_port = htons(sendRtpPort);
-
-#ifdef USE_DIRECT_IP
-      // Use the stored client IP directly for both unicast and multicast
-      inet_aton(clientIP.toString().c_str(), &client_addr.sin_addr);
-#else
       // Determine IP address based on whether it's multicast or unicast
       if (isMulticast) {
         inet_aton(this->rtpIp.toString().c_str(), &client_addr.sin_addr);
       } else {
         socklen_t addrLen = sizeof(client_addr);
         if (getpeername(sock, (struct sockaddr*)&client_addr, &addrLen) == -1) {
-          ESP_LOGE(LOG_TAG, "Failed to get peer IP address");
+          RTSP_LOGE(LOG_TAG, "Failed to get peer IP address");
           return;
         }
       }
-#endif
+      client_addr.sin_port = htons(sendRtpPort);
 
       int rtpSocket = isMulticast ? this->audioMulticastSocket : this->audioUnicastSocket;
 
@@ -336,16 +268,6 @@ void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddre
   }
 }
 
-/**
- * @brief Sends RTP subtitles.
- * 
- * @param data Pointer to the subtitles data.
- * @param len Length of the subtitles data.
- * @param sock Socket to use for sending.
- * @param clientIP Client IP address.
- * @param sendRtpPort RTP port to use for sending.
- * @param useTCP Indicates if TCP is used.
- */
 void RTSPServer::sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
   const int RtpHeaderSize = 12; // RTP header size
   int RtpPacketSize = len + RtpHeaderSize;
@@ -386,23 +308,17 @@ void RTSPServer::sendRtpSubtitles(const char* data, size_t len, int sock, IPAddr
     struct sockaddr_in client_addr;
     memset(&client_addr, 0, sizeof(client_addr));
     client_addr.sin_family = AF_INET;
-    client_addr.sin_port = htons(sendRtpPort);
-
-#ifdef USE_DIRECT_IP
-    // Use the stored client IP directly for both unicast and multicast
-    inet_aton(clientIP.toString().c_str(), &client_addr.sin_addr);
-#else
     // Determine IP address based on whether it's multicast or unicast
     if (isMulticast) {
       inet_aton(this->rtpIp.toString().c_str(), &client_addr.sin_addr);
     } else {
       socklen_t addrLen = sizeof(client_addr);
       if (getpeername(sock, (struct sockaddr*)&client_addr, &addrLen) == -1) {
-        ESP_LOGE(LOG_TAG, "Failed to get peer IP address");
+        RTSP_LOGE(LOG_TAG, "Failed to get peer IP address");
         return;
       }
     }
-#endif
+    client_addr.sin_port = htons(sendRtpPort);  
 
     int rtpSocket = isMulticast ? this->subtitlesMulticastSocket : this->subtitlesUnicastSocket;
 

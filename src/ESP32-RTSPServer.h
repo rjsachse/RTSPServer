@@ -1,5 +1,5 @@
-#ifndef RTSP_SERVER_H
-#define RTSP_SERVER_H
+#ifndef ESP32_RTSP_SERVER_H
+#define ESP32_RTSP_SERVER_H
 
 #include <WiFi.h>
 #include "lwip/sockets.h"
@@ -11,38 +11,42 @@
 #define RTP_PRI 10
 #define RTSP_STACK_SIZE (1024 * 8)
 #define RTSP_PRI 10
-#define MAX_CLIENTS 5 // max rtsp clients
+#define MAX_CLIENTS 10 // max rtsp clients
 
 #define RTSP_BUFFER_SIZE 8092
 
+// Define ESP32_RTSP_LOGGING_ENABLED to enable logging
+//#define RTSP_LOGGING_ENABLED // save 7.7kb of flash
+
+#ifdef RTSP_LOGGING_ENABLED
+  #define RTSP_LOGI(tag, format, ...) ESP_LOGI(tag, format, ##__VA_ARGS__)
+  #define RTSP_LOGW(tag, format, ...) ESP_LOGW(tag, format, ##__VA_ARGS__)
+  #define RTSP_LOGE(tag, format, ...) ESP_LOGE(tag, format, ##__VA_ARGS__)
+  #define RTSP_LOGD(tag, format, ...) ESP_LOGD(tag, format, ##__VA_ARGS__)
+#else
+  #define RTSP_LOGI(tag, format, ...)
+  #define RTSP_LOGW(tag, format, ...)
+  #define RTSP_LOGE(tag, format, ...)
+  #define RTSP_LOGD(tag, format, ...)
+#endif
+
 // User defined options in sketch
 //#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
-//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming, Create a separate task for video streaming so does not block main sketch video task
-
-/**
- * @brief Structure representing an RTSP session.
- */
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming by creating a separate task for video streaming, preventing it from blocking the main sketch.
 struct RTSP_Session {
   uint32_t sessionID;
+  int sock;
   IPAddress clientIP;
+  int cseq;
   uint16_t cVideoPort;
   uint16_t cAudioPort;
   uint16_t cSrtPort;
-  int sock;
-  int cseq;
   bool isMulticast;
   bool isPlaying;
   bool isTCP;
 };
-
-/**
- * @brief Class representing the RTSP Server.
- */
 class RTSPServer {
 public:
-  /**
-   * @brief Enumeration for transport types.
-   */
   enum TransportType {
     VIDEO_ONLY,
     AUDIO_ONLY,
@@ -54,90 +58,28 @@ public:
     NONE,
   };
 
-  RTSPServer();  // Default constructor
-  ~RTSPServer();  // Destructor
+  RTSPServer();  // Defined in ESP32-RTSPServer.cpp
+  ~RTSPServer();  // Destructor, defined in ESP32-RTSPServer.cpp
 
-  /**
-   * @brief Initializes the RTSP server with the specified configuration.
-   * @param transport The transport type (VIDEO_ONLY, AUDIO_ONLY, VIDEO_AND_AUDIO, etc.).
-   * @param rtspPort The RTSP port to use.
-   * @param sampleRate The sample rate for audio streaming.
-   * @param port1 The first port (used for video or audio depending on transport).
-   * @param port2 The second port (used for audio or subtitles depending on transport).
-   * @param port3 The third port (used for subtitles).
-   * @param rtpIp The IP address for RTP streaming.
-   * @param rtpTTL The TTL value for RTP packets.
-   * @return true if initialization is successful, false otherwise.
-   */
-  bool init(TransportType transport = NONE, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255);
+  bool init(TransportType transport = NONE, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255);  // Defined in ESP32-RTSPServer.cpp
   
-  /**
-   * @brief Deinitialize the RTSP server. 
-   */
-  void deinit();
+  void deinit();  // Defined in ESP32-RTSPServer.cpp
 
-  /**
-   * @brief Reinitialize the RTSP server. 
-   * 
-   * @return true if reinitialization was successful, false otherwise.
-   */
-  bool reinit();
+  bool reinit();  // Defined in ESP32-RTSPServer.cpp
 
-  /** 
-   * @brief Sends a TCP packet.
-   * @param packet Pointer to the packet data.
-   * @param packetSize Size of the packet data.
-   * @param sock Socket to send the packet through. 
-   */
-  void sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock);
+  void sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height);  // Defined in rtp.cpp
 
-  /**
-   * @brief Sends an RTSP frame.
-   * @param data Pointer to the frame data.
-   * @param len Length of the frame data.
-   * @param quality Quality of the frame.
-   * @param width Width of the frame.
-   * @param height Height of the frame.
-   */
-  void sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height);
+  void sendRTSPAudio(int16_t* data, size_t len);  // Defined in rtp.cpp
 
-  /**
-   * @brief Sends RTSP audio data.
-   * @param data Pointer to the audio data.
-   * @param len Length of the audio data.
-   */
-  void sendRTSPAudio(int16_t* data, size_t len);
+  void sendRTSPSubtitles(char* data, size_t len);  // Defined in rtp.cpp
 
-  /**
-   * @brief Sends RTSP subtitles.
-   * @param data Pointer to the subtitles data.
-   * @param len Length of the subtitles data.
-   */
-  void sendRTSPSubtitles(char* data, size_t len);
+  void startSubtitlesTimer(esp_timer_cb_t userCallback);  // Defined in utils.cpp
 
-  /**
-   * @brief Starts a timer for subtitles.
-   * @param userCallback Callback function to be called when the timer expires.
-   */
-  void startSubtitlesTimer(esp_timer_cb_t userCallback);
+  bool readyToSendFrame() const;  // Defined in utils.cpp
 
-  /**
-   * @brief Checks if the server is ready to send a frame.
-   * @return true if ready, false otherwise.
-   */
-  bool readyToSendFrame() const;
+  bool readyToSendAudio() const;  // Defined in utils.cpp
 
-  /**
-   * @brief Checks if the server is ready to send audio.
-   * @return true if ready, false otherwise.
-   */
-  bool readyToSendAudio() const;
-
-  /**
-   * @brief Checks if the server is ready to send subtitles.
-   * @return true if ready, false otherwise.
-   */
-  bool readyToSendSubtitles() const;
+  bool readyToSendSubtitles() const;  // Defined in utils.cpp
 
   uint32_t rtpFps;
   TransportType transport;
@@ -197,188 +139,71 @@ private:
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
   SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
 
-  void closeSockets();
-
-  /**
-   * @brief Sets up RTP streaming.
-   * @param rtpSocket Reference to the RTP socket.
-   * @param isMulticast Indicates if multicast is used.
-   * @param rtpPort The RTP port to use.
-   * @param rtpIp The RTP IP address.
-   */
-  void checkAndSetupUDP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());
-
-  /**
-   * @brief Sends RTP subtitles.
-   * @param data Pointer to the subtitles data.
-   * @param len Length of the subtitles data.
-   * @param sock Socket to use for sending.
-   * @param clientIP Client IP address.
-   * @param sendRtpPort RTP port to use for sending.
-   * @param useTCP Indicates if TCP is used.
-   */
-  void sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
-
-  /**
-   * @brief Sends RTP audio.
-   * @param data Pointer to the audio data.
-   * @param len Length of the audio data.
-   * @param sock Socket to use for sending.
-   * @param clientIP Client IP address.
-   * @param sendRtpPort RTP port to use for sending.
-   * @param useTCP Indicates if TCP is used.
-   */
-  void sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
-
-  /**
-   * @brief Sends an RTP frame.
-   * @param data Pointer to the frame data.
-   * @param len Length of the frame data.
-   * @param quality Quality of the frame.
-   * @param width Width of the frame.
-   * @param height Height of the frame.
-   * @param sock Socket to use for sending.
-   * @param clientIP Client IP address.
-   * @param sendRtpPort RTP port to use for sending.
-   * @param useTCP Indicates if TCP is used.
-   */
-  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);
-
-  /**
-   * @brief Task wrapper for RTP video.
-   * @param pvParameters Task parameters.
-   */
-  static void rtpVideoTaskWrapper(void* pvParameters);
-
-  /**
-   * @brief Task for handling RTP video.
-   */
-  void rtpVideoTask();
-
-  /**
-   * @brief Set max clients.
-   */
-  void setMaxClients(uint8_t newMaxClients); 
-
-  /**
-   * @brief Get max clients.
-   */
-  uint8_t getMaxClients();
-
-  /**
-   * @brief Get the count of active clients.
-   * @return Active clients.
-   */
-  uint8_t getActiveClients();
+  void closeSockets();  // Defined in ESP32-RTSPServer.cpp
   
-  void incrementActiveRTSPClients();
+  void sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock);  // Defined in network.cpp
 
-  void decrementActiveRTSPClients();
+  void checkAndSetupUDP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());  // Defined in network.cpp
 
-  uint8_t getActiveRTSPClients();
+  void sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
 
-  void updateIsPlayingStatus(); 
+  void sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+
+  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+
+  static void rtpVideoTaskWrapper(void* pvParameters);  // Defined in rtp.cpp
+
+  void rtpVideoTask();  // Defined in rtp.cpp
+
+  void setMaxClients(uint8_t newMaxClients);  // Defined in utils.cpp
+
+  uint8_t getMaxClients();  // Defined in utils.cpp
+
+  uint8_t getActiveClients();  // Defined in utils.cpp
   
-  void setIsPlaying(bool playing); 
+  void incrementActiveRTSPClients();  // Defined in utils.cpp
+
+  void decrementActiveRTSPClients();  // Defined in utils.cpp
+
+  uint8_t getActiveRTSPClients();  // Defined in utils.cpp
+
+  void updateIsPlayingStatus();  // Defined in utils.cpp
   
-  bool getIsPlaying() const;
-
-  /**
-   * @brief Captures the CSeq from an RTSP request.
-   * @param request The RTSP request.
-   * @return The CSeq value.
-   */
-  int captureCSeq(char* request);
-
-  /**
-   * @brief Generates a new session ID.
-   * @return The generated session ID.
-   */
-  uint32_t generateSessionID();
-
-  /**
-   * @brief Extracts the session ID from an RTSP request.
-   * @param request The RTSP request.
-   * @return The extracted session ID.
-   */
-  uint32_t extractSessionID(char* request);
-
-  /**
-   * @brief Generates the Date header for RTSP responses.
-   * @return The Date header as a string.
-   */
-  const char* dateHeader();
-
-  /**
-   * @brief Handles the OPTIONS RTSP request.
-   * @param request The RTSP request.
-   * @param session The RTSP session.
-   */
-  void handleOptions(char* request, RTSP_Session& session);
-
-  /**
-   * @brief Handles the DESCRIBE RTSP request.
-   * @param session The RTSP session.
-   */
-  void handleDescribe(const RTSP_Session& session);
-
-  /**
-   * @brief Handles the SETUP RTSP request.
-   * @param request The RTSP request.
-   * @param session The RTSP session.
-   */
-  void handleSetup(char* request, RTSP_Session& session);
-
-  /**
-   * @brief Handles the PLAY RTSP request.
-   * @param session The RTSP session.
-   */
-  void handlePlay(RTSP_Session& session);
-
-  /**
-   * @brief Handles the PAUSE RTSP request.
-   * @param session The RTSP session.
-   */
-  void handlePause(RTSP_Session& session);
-
-  /**
-   * @brief Handles the TEARDOWN RTSP request.
-   * @param session The RTSP session.
-   */
-  void handleTeardown(RTSP_Session& session);
-
-  /**
-   * @brief Handles incoming RTSP requests.
-   * @param sockfd The socket file descriptor.
-   * @param clientAddr The client address.
-   * @return true if the request was handled successfully, false otherwise.
-   */
-  bool handleRTSPRequest(int sockfd, struct sockaddr_in clientAddr);
-  bool handleRTSPRequest(RTSP_Session& session);
-  /**
-   * @brief Sets a socket to non-blocking mode.
-   * @param sockfd The socket file descriptor.
-   * @return true if handled successfully, false otherwise.
-   */
-  bool setNonBlocking(int sockfd);
-
-  /**
-   * @brief Prepares the RTSP server for streaming.
-   * @return true if the preparation is successful, false otherwise.
-   */
-  bool prepRTSP();
-
-  /**
-   * @brief Task wrapper for RTSP.
-   * @param pvParameters Task parameters.
-   */
-  static void rtspTaskWrapper(void* pvParameters);
+  void setIsPlaying(bool playing);  // Defined in utils.cpp
   
-  /**
-   * @brief Task for handling RTSP requests.
-   */
-  void rtspTask();
+  bool getIsPlaying() const;  // Defined in utils.cpp
+
+  int captureCSeq(char* request);  // Defined in utils.cpp
+
+  uint32_t generateSessionID();  // Defined in utils.cpp
+
+  uint32_t extractSessionID(char* request);  // Defined in utils.cpp
+
+  const char* dateHeader();  // Defined in utils.cpp
+
+  void handleOptions(char* request, RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  void handleDescribe(const RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  void handleSetup(char* request, RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  void handlePlay(RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  void handlePause(RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  void handleTeardown(RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  bool handleRTSPRequest(RTSP_Session& session);  // Defined in rtsp_requests.cpp
+
+  bool setNonBlocking(int sockfd);  // Defined in network.cpp
+
+  bool prepRTSP();  // Defined in ESP32-RTSPServer.cpp
+
+  static void rtspTaskWrapper(void* pvParameters);  // Defined in ESP32-RTSPServer.cpp
+
+  void rtspTask();  // Defined in ESP32-RTSPServer.cpp
+
   static const char* LOG_TAG;  // Define a log tag for the class
 };
 
-#endif // RTSP_SERVER_H
+#endif // ESP32_RTSP_SERVER_H
