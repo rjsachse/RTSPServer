@@ -14,11 +14,11 @@ void RTSPServer::rtpVideoTask() {
       if (session.isPlaying) {
         if (session.isMulticast) {
           if (!multicastSent) {
-            this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, this->rtpIp, this->rtpVideoPort, false, true);
+            this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, this->rtpVideoPort, false, true);
             multicastSent = true;
           }
         } else {
-          this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, session.clientIP, session.cVideoPort, session.isTCP, false);
+          this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, session.cVideoPort, session.isTCP, false);
         }
       }
     }
@@ -62,11 +62,11 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
     if (session.isPlaying) {
       if (session.isMulticast) {
         if (!multicastSent) { 
-          sendRtpFrame(data, len, quality, width, height, session.sock, this->rtpIp, this->rtpVideoPort, false, true); 
+          sendRtpFrame(data, len, quality, width, height, session.sock, this->rtpVideoPort, false, true); 
           multicastSent = true; 
         }
       } else {
-        sendRtpFrame(data, len, quality, width, height, session.sock, session.clientIP, session.cVideoPort, session.isTCP, false);
+        sendRtpFrame(data, len, quality, width, height, session.sock, session.cVideoPort, session.isTCP, false);
       }
     }
   }
@@ -83,11 +83,11 @@ void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
     if (session.isPlaying) {
       if (session.isMulticast) {
         if (!multicastSent) {
-          this->sendRtpAudio(data, len, session.sock, this->rtpIp, this->rtpAudioPort, false, true);
+          this->sendRtpAudio(data, len, session.sock, this->rtpAudioPort, false, true);
           multicastSent = true;
         }
       } else {
-        this->sendRtpAudio(data, len, session.sock, session.clientIP, session.cAudioPort, session.isTCP, false);
+        this->sendRtpAudio(data, len, session.sock, session.cAudioPort, session.isTCP, false);
       }
     }
   }
@@ -102,18 +102,18 @@ void RTSPServer::sendRTSPSubtitles(char* data, size_t len) {
     if (session.isPlaying) {
       if (session.isMulticast) {
           if (!multicastSent) {
-            this->sendRtpSubtitles(data, len, session.sock, this->rtpIp, this->rtpSubtitlesPort, false, true);
+            this->sendRtpSubtitles(data, len, session.sock, this->rtpSubtitlesPort, false, true);
             multicastSent = true;
         }
       } else {
-        this->sendRtpSubtitles(data, len, session.sock, session.clientIP, session.cSrtPort, session.isTCP, false);
+        this->sendRtpSubtitles(data, len, session.sock, session.cSrtPort, session.isTCP, false);
       }
     }
   }
   this->rtpSubtitlesSent = true;
 }
 
-void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
+void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
   const int RtpHeaderSize = 20;
   const int MAX_FRAGMENT_SIZE = 1438;
   uint32_t jpegLen = len;
@@ -195,7 +195,7 @@ void RTSPServer::sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, 
   }
 }
 
-void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
+void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
   const int RtpHeaderSize = 12; // RTP header size
   const int MAX_FRAGMENT_SIZE = 1446; // Adjust based on your requirements
   uint32_t audioLen = len;
@@ -268,7 +268,7 @@ void RTSPServer::sendRtpAudio(const int16_t* data, size_t len, int sock, IPAddre
   }
 }
 
-void RTSPServer::sendRtpSubtitles(const char* data, size_t len, int sock, IPAddress clientIP, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
+void RTSPServer::sendRtpSubtitles(const char* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast) {
   const int RtpHeaderSize = 12; // RTP header size
   int RtpPacketSize = len + RtpHeaderSize;
 
