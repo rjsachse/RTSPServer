@@ -14,7 +14,7 @@ If this library has been useful to you, please consider donating or sponsoring t
 Thank you for your support!
 
 ## Overview
-This is my first library I have created. RTSPServer Library is for the ESP32, designed to stream video, audio, and subtitles. This library allows you to easily create an RTSP server for streaming multimedia content using an ESP32. It supports various transport types and integrates with the ESP32 camera and I2S audio interfaces.
+ESP32-RTSPServer Library is for the ESP32, designed to stream video, audio, and subtitles. This library allows you to easily create an RTSP server for streaming multimedia content using an ESP32. It supports various transport types and integrates with the ESP32 camera and I2S audio interfaces.
 
 ## Features
 - **Multiple Clients**: Multiple clients for multicast or for all transports with a define override
@@ -43,15 +43,7 @@ This is my first library I have created. RTSPServer Library is for the ESP32, de
 | UXGA       | 5 Fps      |
 
 ## Prerequisites
-This library requires the ESP32 core by Espressif. Ensure you have at least version 3.0.7 installed.
-
-### Installing the ESP32 Core by Espressif
-1. Open the Arduino IDE.
-2. Go to `File` -> `Preferences`.
-3. In the "Additional Board Manager URLs" field, add the following URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
-4. Click `OK` to close the Preferences window.
-5. Go to `Tools` -> `Board` -> `Boards Manager`.
-6. Search for `esp32` and install the latest version by Espressif.
+This library requires the ESP32 core by Espressif. Ensure you have at least version 3.1.1 installed.
 
 ## Installation
 1. **Manual Installation**:
