@@ -17,11 +17,30 @@ Thank you for your support!
 This is my first library I have created. RTSPServer Library is for the ESP32, designed to stream video, audio, and subtitles. This library allows you to easily create an RTSP server for streaming multimedia content using an ESP32. It supports various transport types and integrates with the ESP32 camera and I2S audio interfaces.
 
 ## Features
+- **Multiple Clients**: Multiple clients for multicast or for all transports with a define override
 - **Video Streaming**: Stream video from the ESP32 camera.
 - **Audio Streaming**: Stream audio using I2S.
 - **Subtitles**: Stream subtitles alongside video and audio.
 - **Transport Types**: Supports multiple transport types, including video-only, audio-only, and combined streams.
 - **Protocols**: Stream multicast, unicast UDP & TCP (TCP is Slower).
+
+## Test Results with OV2460
+
+| Resolution | Frame Rate |
+|------------|------------|
+| QQVGA      | 50 Fps     |
+| QCIF       | 50 Fps     |
+| HQVGA      | 50 Fps     |
+| 240X240    | 50 Fps     |
+| QVGA       | 50 Fps     |
+| CIF        | 50 Fps     |
+| HVGA       | 50 Fps     |
+| VGA        | 25 Fps     |
+| SVGA       | 25 Fps     |
+| XGA        | 12.5 Fps   |
+| HD         | 12.5 Fps   |
+| SXGA       | 12.5 Fps   |
+| UXGA       | 5 Fps      |
 
 ## Prerequisites
 This library requires the ESP32 core by Espressif. Ensure you have at least version 3.0.7 installed.
