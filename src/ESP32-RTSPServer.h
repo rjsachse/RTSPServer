@@ -80,6 +80,8 @@ public:
 
   bool readyToSendSubtitles() const;  // Defined in utils.cpp
 
+  void setCredentials(const char* username, const char* password); // Add method to set credentials
+
   uint32_t rtpFps;
   TransportType transport;
   uint32_t sampleRate;
@@ -133,6 +135,8 @@ private:
   bool firstClientConnected; 
   bool firstClientIsMulticast; 
   bool firstClientIsTCP;
+  bool authEnabled; // Flag to indicate if authentication is enabled
+  char base64Credentials[128]; // Store base64 encoded credentials
   esp_timer_handle_t sendSubtitlesTimer;
   SemaphoreHandle_t isPlayingMutex;  // Mutex for protecting access
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
@@ -203,6 +207,8 @@ private:
   void rtspTask();  // Defined in ESP32-RTSPServer.cpp
 
   static const char* LOG_TAG;  // Define a log tag for the class
+
+  void sendUnauthorizedResponse(RTSP_Session& session); // Add method to send 401 Unauthorized response
 };
 
 #endif // ESP32_RTSP_SERVER_H

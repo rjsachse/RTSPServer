@@ -51,7 +51,8 @@ RTSPServer::RTSPServer()
     isPlaying(false),
     firstClientConnected(false),
     firstClientIsMulticast(false),
-    firstClientIsTCP(false)
+    firstClientIsTCP(false),
+    authEnabled(false) // Initialize authEnabled to false
 {
     isPlayingMutex = xSemaphoreCreateMutex(); // Initialize the mutex
     sendTcpMutex = xSemaphoreCreateMutex(); // Initialize the mutex

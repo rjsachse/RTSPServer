@@ -17,6 +17,7 @@ Thank you for your support!
 ESP32-RTSPServer Library is for the ESP32, designed to stream video, audio, and subtitles. This library allows you to easily create an RTSP server for streaming multimedia content using an ESP32. It supports various transport types and integrates with the ESP32 camera and I2S audio interfaces.
 
 ## Features
+- **Authentication**: Able to set user and password for RTSP Stream
 - **Multiple Clients**: Multiple clients for multicast or for all transports with a define override
 - **Video Streaming**: Stream video from the ESP32 camera.
 - **Audio Streaming**: Stream audio using I2S.
@@ -24,7 +25,7 @@ ESP32-RTSPServer Library is for the ESP32, designed to stream video, audio, and 
 - **Transport Types**: Supports multiple transport types, including video-only, audio-only, and combined streams.
 - **Protocols**: Stream multicast, unicast UDP & TCP (TCP is Slower).
 
-## Test Results with OV2460
+## Test Results with OV2460 on ESP32S3
 
 | Resolution | Frame Rate |
 |------------|------------|
@@ -43,7 +44,7 @@ ESP32-RTSPServer Library is for the ESP32, designed to stream video, audio, and 
 | UXGA       | 5 Fps      |
 
 ## Prerequisites
-This library requires the ESP32 core by Espressif. Ensure you have at least version 3.1.1 installed.
+This library requires the ESP32 Arduino core by Espressif. Ensure you have at least version 3.1.1 installed.
 
 ## Installation
 1. **Manual Installation**:
@@ -70,14 +71,20 @@ Basic Setup
 // RTSPServer instance
 RTSPServer rtspServer;
 
-// Creates a new task so the main camera task can continue
-//#define RTSP_VIDEO_NONBLOCK // uncomment if already have a camera task.
+// Can set a username and password for RTSP authentication or leave blank for no authentication
+const char *rtspUser = "";
+const char *rtspPassword = "";
+
+// User defined options
+//#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
+//#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming by creating a separate task for video streaming, preventing it from blocking the main sketch.
+//#define RTSP_LOGGING_ENABLED //Also enable "Core Debug Level" to "Info" in Tools -> Core Debug Level to enable logging
 
 
 // Task handles
 TaskHandle_t videoTaskHandle = NULL; 
 TaskHandle_t audioTaskHandle = NULL; 
-TaskHandle_t subtitlesTaskHandle = NULL;
+TaskHandle_t subtitlesTaskHandle = NULL; // Optional
 
 void getFrameQuality() { 
   sensor_t * s = esp_camera_sensor_get(); 
@@ -109,6 +116,7 @@ void sendAudio(void* pvParameters) {
   }
 }
 
+// Optional
 void sendSubtitles(void* pvParameters) {
   char data[100];
   while (true) {
@@ -125,9 +133,18 @@ void setup() {
   getFrameQuality(); //Retrieve frame quality
 
   // Create tasks for sending video, and subtitles
-  xTaskCreate(sendVideo, "Video", 3584, NULL, 1, &videoTaskHandle);
-  xTaskCreate(sendAudio, "Audio", 2560, NULL, 1, &audioTaskHandle);
-  xTaskCreate(sendSubtitles, "Subtitles", 2048, NULL, 1, &subtitlesTaskHandle);
+  xTaskCreate(sendVideo, "Video", 1024 * 5, NULL, 9, &videoTaskHandle);
+  xTaskCreate(sendAudio, "Audio", 1024 * 5, NULL, 8, &audioTaskHandle);
+
+  // Optional
+  // Can use either a Task
+  xTaskCreate(sendSubtitles, "Subtitles", 1024 * 2, NULL, 7, &subtitlesTaskHandle);
+  // Or Timer for subtitles
+  rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
+
+  rtspServer.maxRTSPClients = 5; // Set the maximum number of RTSP Multicast clients else enable OVERRIDE_RTSP_SINGLE_CLIENT_MODE to allow multiple clients for all transports eg. TCP, UDP, Multicast
+
+  rtspServer.setCredentials(rtspUser, rtspPassword); // Set RTSP authentication
 
   // Initialize the RTSP server
    //Example Setup usage:
@@ -190,14 +207,17 @@ On the left open "Input / Codecs" then "Demuxes" then "RTP/RTSP" to enable TCP o
 ## Optional Defines
 
 You can customize the behavior of the RTSPServer library by defining the following macros in your sketch:
-
-- **OVERRIDE_RTSP_SINGLE_CLIENT_MODE**
+```cpp
+#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE 
+```
   - Description: Override the default behavior of allowing only one client for unicast or TCP.
-
-- **RTSP_VIDEO_NONBLOCK**
+```cpp
+#define RTSP_VIDEO_NONBLOCK
+```
   - Description: Enable non-blocking video streaming. Creates a separate task for video streaming so it does not block the main sketch video task.
-
-- **RTSP_LOGGING_ENABLED**
+```cpp
+#define RTSP_LOGGING_ENABLED
+```
   - Description: Enable logging for debugging purposes. This will save 7.7KB of flash memory if disabled.
 
 ## API Reference
@@ -205,14 +225,18 @@ You can customize the behavior of the RTSPServer library by defining the followi
 ### Class: RTSPServer
 
 #### Methods
-
-- **RTSPServer()**
+```cpp
+RTSPServer()
+```
   - Description: Constructor for the RTSPServer class.
 
-- **~RTSPServer()**
+```cpp
+~RTSPServer()
+```
   - Description: Destructor for the RTSPServer class.
-
-- **bool init(TransportType transport = NONE, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255)**
+```cpp
+bool init(TransportType transport = NONE, uint16_t rtspPort = 0, uint32_t sampleRate = 0, uint16_t port1 = 0, uint16_t port2 = 0, uint16_t port3 = 0, IPAddress rtpIp = IPAddress(), uint8_t rtpTTL = 255)
+```
   - Description: Initializes the RTSP server with specified settings.
   - Parameters:
     - `transport` (TransportType): Type of transport (default is NONE).
@@ -225,14 +249,20 @@ You can customize the behavior of the RTSPServer library by defining the followi
     - `rtpTTL` (uint8_t): TTL for RTP (default is 255).
   - Returns: `bool` - `true` if the server initialized successfully, `false` otherwise.
 
-- **void deinit()**
+```cpp
+void deinit()
+```
   - Description: Deinitializes the RTSP server.
 
-- **bool reinit()**
+```cpp
+bool reinit()
+```
   - Description: Reinitializes the RTSP server.
   - Returns: `bool` - `true` if the server reinitialized successfully, `false` otherwise.
 
-- **void sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height)**
+```cpp
+void sendRTSPFrame(const uint8_t* data, size_t len, int quality, int width, int height)
+```
   - Description: Sends a video frame via RTP.
   - Parameters:
     - `data` (const uint8_t*): Pointer to the frame data.
@@ -241,65 +271,96 @@ You can customize the behavior of the RTSPServer library by defining the followi
     - `width` (int): Width of the frame.
     - `height` (int): Height of the frame.
 
-- **void sendRTSPAudio(int16_t* data, size_t len)**
+```cpp
+void sendRTSPAudio(int16_t* data, size_t len)
+```
   - Description: Sends audio data via RTP.
   - Parameters:
     - `data` (int16_t*): Pointer to the audio data.
     - `len` (size_t): Length of the audio data.
 
-- **void sendRTSPSubtitles(char* data, size_t len)**
+```cpp
+void sendRTSPSubtitles(char* data, size_t len)
+```
   - Description: Sends subtitle data via RTP.
   - Parameters:
     - `data` (char*): Pointer to the subtitle data.
     - `len` (size_t): Length of the subtitle data.
 
-- **void startSubtitlesTimer(esp_timer_cb_t userCallback)**
+```cpp
+void startSubtitlesTimer(esp_timer_cb_t userCallback)
+```
   - Description: Starts a timer for sending subtitles.
   - Parameters:
     - `userCallback` (esp_timer_cb_t): Callback function to be called by the timer.
 
-- **bool readyToSendFrame() const**
+```cpp
+bool readyToSendFrame() const
+```
   - Description: Checks if the server is ready to send a video frame.
   - Returns: `bool` - `true` if ready, `false` otherwise.
 
-- **bool readyToSendAudio() const**
+```cpp
+bool readyToSendAudio() const
+```
   - Description: Checks if the server is ready to send audio data.
   - Returns: `bool` - `true` if ready, `false` otherwise.
 
-- **bool readyToSendSubtitles() const**
+```cpp
+bool readyToSendSubtitles() const
+```
   - Description: Checks if the server is ready to send subtitle data.
   - Returns: `bool` - `true` if ready, `false` otherwise.
 
+```cpp
+void setCredentials(const char* username, const char* password)
+```
+  - Description: Sets the credentials for basic authentication.
+  - Parameters:
+    - `username` (const char*): The username for authentication.
+    - `password` (const char*): The password for authentication.
+
 #### Variables
+```cpp
+uint32_t rtpFps
+```
+  - Description: Read current FPS.
 
-- **uint32_t rtpFps**
-  - Description: Read FPS.
-
-- **TransportType transport**
-  - Description: Type of transport.
-
-- **uint32_t sampleRate**
+```cpp
+TransportType transport
+```
+  - Description: Type of transport. eg. VIDEO_ONLY
+```cpp
+uint32_t sampleRate
+```
   - Description: Sample rate for audio streaming.
-
-- **int rtspPort**
+```cpp
+int rtspPort
+```
   - Description: Port number for the RTSP server.
-
-- **IPAddress rtpIp**
+```cpp
+IPAddress rtpIp
+```
   - Description: Multicast address.
-
-- **uint8_t rtpTTL**
+```cpp
+uint8_t rtpTTL
+```
   - Description: TTL for RTP.
-
-- **uint16_t rtpVideoPort**
+```cpp
+uint16_t rtpVideoPort
+```
   - Description: Port number for video.
-
-- **uint16_t rtpAudioPort**
+```cpp
+uint16_t rtpAudioPort
+```
   - Description: Port number for audio.
-
-- **uint16_t rtpSubtitlesPort**
+```cpp
+uint16_t rtpSubtitlesPort
+```
   - Description: Port number for subtitles.
-
-- **uint8_t maxRTSPClients**
+```cpp
+uint8_t maxRTSPClients
+```
   - Description: Maximum number of RTSP clients.
 
 ## Support This Project

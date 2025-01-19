@@ -35,6 +35,10 @@ const char *password = "**********";
 // RTSPServer instance
 RTSPServer rtspServer;
 
+// Can set a username and password for RTSP authentication or leave blank for no authentication
+const char *rtspUser = "";
+const char *rtspPassword = "";
+
 // Define HAVE_AUDIO to include audio-related code
 #define HAVE_AUDIO // Comment out if don't have audio
 
@@ -320,22 +324,24 @@ void setup() {
   if (setupMic()) {
     Serial.println("Microphone Setup Complete");
     // Create tasks for sending audio
-    xTaskCreate(sendAudio, "Audio", 8192, NULL, 1, &audioTaskHandle);
+    xTaskCreate(sendAudio, "Audio", 8192, NULL, 8, &audioTaskHandle);
   } else {
     Serial.println("Mic Setup Failed!");
   }
 #endif
 
   // Create tasks for sending video, and subtitles
-  xTaskCreate(sendVideo, "Video", 8192, NULL, 1, &videoTaskHandle);
+  xTaskCreate(sendVideo, "Video", 8192, NULL, 9, &videoTaskHandle);
   
   // You can use a task to send subtitles every second
-  //xTaskCreate(sendSubtitles, "Subtitles", 2560, NULL, 1, &subtitlesTaskHandle);
+  //xTaskCreate(sendSubtitles, "Subtitles", 2560, NULL, 7, &subtitlesTaskHandle);
 
   // Or a callback to send the subtitles with the callback function 
   rtspServer.startSubtitlesTimer(onSubtitles); // 1-second period
 
   rtspServer.maxRTSPClients = 5; // Set the maximum number of RTSP Multicast clients else enable OVERRIDE_RTSP_SINGLE_CLIENT_MODE to allow multiple clients for all transports eg. TCP, UDP, Multicast
+
+  rtspServer.setCredentials(rtspUser, rtspPassword); // Set RTSP authentication
 
   // Initialize the RTSP server
   /**
