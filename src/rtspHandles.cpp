@@ -382,6 +382,34 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
     session.sessionID = sessionID;
   }
 
+  // Authentication check
+  if (authEnabled) {
+    char* authHeader = strstr(buffer, "Authorization: Basic ");
+    if (!authHeader) {
+      sendUnauthorizedResponse(session);
+      free(buffer); // Free allocated memory
+      return true;
+    } else {
+      authHeader += 21; // Move pointer to the base64 encoded credentials
+      char* authEnd = strstr(authHeader, "\r\n");
+      if (authEnd) {
+        *authEnd = 0; // Null-terminate the base64 string
+        if (strcmp(authHeader, base64Credentials) != 0) {
+          sendUnauthorizedResponse(session);
+          free(buffer); // Free allocated memory
+          return true;
+        } else {
+          // Remove the Authorization header from the buffer before continuing
+          memmove(authHeader - 21, authEnd + 2, strlen(authEnd + 2) + 1);
+        }
+      } else {
+        sendUnauthorizedResponse(session);
+        free(buffer); // Free allocated memory
+        return true;
+      }
+    }
+  }
+
   // Handle different RTSP methods
   if (strncmp(buffer, "OPTIONS", 7) == 0) {
     RTSP_LOGD(LOG_TAG, "HandleOptions");
@@ -409,4 +437,15 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
 
   free(buffer); // Free allocated memory
   return true;
+}
+
+void RTSPServer::sendUnauthorizedResponse(RTSP_Session& session) {
+  char response[256];
+  snprintf(response, sizeof(response),
+           "RTSP/1.0 401 Unauthorized\r\n"
+           "CSeq: %d\r\n"
+           "WWW-Authenticate: Basic realm=\"ESP32\"\r\n\r\n",
+           session.cseq);
+  write(session.sock, response, strlen(response));
+  RTSP_LOGW(LOG_TAG, "Sent 401 Unauthorized response to client.");
 }

@@ -1,4 +1,6 @@
 #include "ESP32-RTSPServer.h"
+#include "libb64/cencode.h" // Include libb64 library
+
 
 void RTSPServer::startSubtitlesTimer(esp_timer_cb_t userCallback) { 
   const esp_timer_create_args_t timerConfig = { 
@@ -148,4 +150,23 @@ const char* RTSPServer::dateHeader() {
   time_t now = time(NULL);
   strftime(buffer, sizeof(buffer), "Date: %a, %d %b %Y %H:%M:%S GMT", gmtime(&now));
   return buffer;
+}
+
+void RTSPServer::setCredentials(const char* username, const char* password) {
+  if (username && password && strlen(username) > 0 && strlen(password) > 0) {
+    char credentials[128];
+    snprintf(credentials, sizeof(credentials), "%s:%s", username, password);
+
+    // Base64 encode the credentials
+    base64_encodestate state;
+    base64_init_encodestate(&state);
+    int encodedLen = base64_encode_chars(credentials, strlen(credentials), base64Credentials);
+    base64Credentials[encodedLen] = '\0'; // Null-terminate the encoded string
+
+    authEnabled = true;
+    RTSP_LOGI(LOG_TAG, "Authentication enabled with provided credentials.");
+  } else {
+    authEnabled = false;
+    RTSP_LOGI(LOG_TAG, "Authentication disabled.");
+  }
 }
