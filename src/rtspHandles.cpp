@@ -17,14 +17,15 @@ void RTSPServer::handleOptions(char* request, RTSP_Session& session) {
     }
   }
   char response[512];
-  snprintf(response, sizeof(response), 
+  int len = snprintf(response, sizeof(response), 
            "RTSP/1.0 200 OK\r\n"
            "CSeq: %d\r\n"
            "%s\r\n"
            "Public: DESCRIBE, SETUP, PLAY, PAUSE, TEARDOWN\r\n\r\n", 
            session.cseq, 
            dateHeader());
-  write(session.sock, response, strlen(response));
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
 }
 
 /**
@@ -32,7 +33,7 @@ void RTSPServer::handleOptions(char* request, RTSP_Session& session) {
  * 
  * @param session The RTSP session.
  */
-void RTSPServer::handleDescribe(const RTSP_Session& session) {
+void RTSPServer::handleDescribe(RTSP_Session& session) {
   char sdpDescription[512];
   int sdpLen = snprintf(sdpDescription, sizeof(sdpDescription),
                         "v=0\r\n"
@@ -71,11 +72,12 @@ void RTSPServer::handleDescribe(const RTSP_Session& session) {
   }
 
   char response[1024];
-  int responseLen = snprintf(response, sizeof(response),
+  int len = snprintf(response, sizeof(response),
                              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nContent-Base: rtsp://%s:554/\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n"
                              "%s",
                              session.cseq, dateHeader(), WiFi.localIP().toString().c_str(), sdpLen, sdpDescription);
-  write(session.sock, response, responseLen);
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
 }
 
 /**
@@ -104,15 +106,14 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
 
     if (rejectConnection) {
       RTSP_LOGW(LOG_TAG, "Rejecting connection because it does not match the first client's connection type");
-      char response[512];
-      snprintf(response, sizeof(response),
+      char response[256];
+      int len = snprintf(response, sizeof(response),
                "RTSP/1.0 461 Unsupported Transport\r\n"
                "CSeq: %d\r\n"
                "%s\r\n\r\n",
                session.cseq, dateHeader());
-      if (write(session.sock, response, strlen(response)) < 0) {
-        RTSP_LOGE(LOG_TAG, "Failed to send rejection response to client.");
-      }
+      this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                    : write(session.sock, response, len);
       return;
     }
   }
@@ -215,10 +216,10 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
     RTSP_LOGE(LOG_TAG, "Failed to allocate memory");
     return;
   }
-
+  int len = 0;
   // Formulate the response based on transport method
   if (session.isTCP) {
-    snprintf(response, 512,
+    len = snprintf(response, 512,
              "RTSP/1.0 200 OK\r\n"
              "CSeq: %d\r\n"
              "%s\r\n"
@@ -226,16 +227,17 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
              "Session: %lu\r\n\r\n",
              session.cseq, dateHeader(), rtpChannel, rtpChannel + 1, session.sessionID);
   } else if (session.isMulticast) {
-    snprintf(response, 512,
+    len = snprintf(response, 512,
              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nTransport: RTP/AVP;multicast;destination=%s;port=%d-%d;ttl=%d\r\nSession: %lu\r\n\r\n",
              session.cseq, dateHeader(), this->rtpIp.toString().c_str(), serverPort, serverPort + 1, this->rtpTTL, session.sessionID);
   } else {
-    snprintf(response, 512,
+    len = snprintf(response, 512,
              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nTransport: RTP/AVP;unicast;destination=127.0.0.1;source=127.0.0.1;client_port=%d-%d;server_port=%d-%d\r\nSession: %lu\r\n\r\n",
              session.cseq, dateHeader(), clientPort, clientPort + 1, serverPort, serverPort + 1, session.sessionID);
   }
 
-  write(session.sock, response, strlen(response));
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
   free(response);
   this->sessions[session.sessionID] = session;
 }
@@ -251,7 +253,7 @@ void RTSPServer::handlePlay(RTSP_Session& session) {
   setIsPlaying(true);
 
   char response[256];
-  snprintf(response, sizeof(response),
+  int len = snprintf(response, sizeof(response),
            "RTSP/1.0 200 OK\r\n"
            "CSeq: %d\r\n"
            "%s\r\n"
@@ -262,7 +264,8 @@ void RTSPServer::handlePlay(RTSP_Session& session) {
            dateHeader(),
            session.sessionID);
 
-  write(session.sock, response, strlen(response));
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
 }
 
 /**
@@ -278,7 +281,8 @@ void RTSPServer::handlePause(RTSP_Session& session) {
   int len = snprintf(response, sizeof(response),
                      "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                      session.cseq, session.sessionID);
-  write(session.sock, response, len);
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
   RTSP_LOGD(LOG_TAG, "Session %u is now paused.", session.sessionID);
 }
 
@@ -291,13 +295,12 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
   session.isPlaying = false;
   this->sessions[session.sessionID] = session;
   updateIsPlayingStatus();
-
   char response[128];
   int len = snprintf(response, sizeof(response),
                      "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                      session.cseq, session.sessionID);
-  write(session.sock, response, len);
-
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
   RTSP_LOGD(LOG_TAG, "RTSP Session %u has been torn down.", session.sessionID);
 }
 
@@ -319,7 +322,8 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
   int len = 0;
 
   // Read data from socket until end of RTSP header or buffer limit is reached
-  while ((len = recv(session.sock, buffer + totalLen, RTSP_BUFFER_SIZE - totalLen - 1, 0)) > 0) {
+  while ((len = useSecure ? mbedtls_ssl_read(&session.ssl, (unsigned char*)(buffer + totalLen), RTSP_BUFFER_SIZE - totalLen - 1)
+                          : recv(session.sock, buffer + totalLen, RTSP_BUFFER_SIZE - totalLen - 1, 0)) > 0)  {
     totalLen += len;
     if (strstr(buffer, "\r\n\r\n")) {
       break;
@@ -369,7 +373,10 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
   int cseq = captureCSeq(buffer);
   if (cseq == -1) {
     RTSP_LOGE(LOG_TAG, "CSeq not found in request");
-    write(session.sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
+    char response[30];
+    int len = snprintf(response, sizeof(response), "RTSP/1.0 400 Bad Request\r\n\r\n");
+    this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                  : write(session.sock, response, len);
     free(buffer); // Free allocated memory
     return true;
   }
@@ -441,11 +448,12 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
 
 void RTSPServer::sendUnauthorizedResponse(RTSP_Session& session) {
   char response[256];
-  snprintf(response, sizeof(response),
+  int len = snprintf(response, sizeof(response),
            "RTSP/1.0 401 Unauthorized\r\n"
            "CSeq: %d\r\n"
            "WWW-Authenticate: Basic realm=\"ESP32\"\r\n\r\n",
            session.cseq);
-  write(session.sock, response, strlen(response));
+  this->useSecure ? mbedtls_ssl_write(&session.ssl, (const unsigned char*)response, len)
+                : write(session.sock, response, len);
   RTSP_LOGW(LOG_TAG, "Sent 401 Unauthorized response to client.");
 }

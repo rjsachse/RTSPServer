@@ -6,6 +6,12 @@
 #include <esp_log.h>
 #include <map>
 
+#include "mbedtls/ssl.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+//#include "mbedtls/certs.h"
+
 #define MAX_RTSP_BUFFER (512 * 1024)
 #define RTP_STACK_SIZE (1024 * 4)
 #define RTP_PRI 10
@@ -16,7 +22,7 @@
 #define RTSP_BUFFER_SIZE 8092
 
 // Define ESP32_RTSP_LOGGING_ENABLED to enable logging
-//#define RTSP_LOGGING_ENABLED // save 7.7kb of flash
+#define RTSP_LOGGING_ENABLED // save 7.7kb of flash
 
 #ifdef RTSP_LOGGING_ENABLED
   #define RTSP_LOGI(tag, format, ...) ESP_LOGI(tag, format, ##__VA_ARGS__)
@@ -36,6 +42,8 @@
 struct RTSP_Session {
   uint32_t sessionID;
   int sock;
+  mbedtls_ssl_context ssl;
+  mbedtls_net_context client_fd;
   int cseq;
   uint16_t cVideoPort;
   uint16_t cAudioPort;
@@ -81,6 +89,8 @@ public:
   bool readyToSendSubtitles() const;  // Defined in utils.cpp
 
   void setCredentials(const char* username, const char* password); // Add method to set credentials
+
+  bool setCertificates(const char* cert, const char* key);
 
   uint32_t rtpFps;
   TransportType transport;
@@ -137,22 +147,31 @@ private:
   bool firstClientIsTCP;
   bool authEnabled; // Flag to indicate if authentication is enabled
   char base64Credentials[128]; // Store base64 encoded credentials
+  bool useSecure = false;
+  const char* userCert = nullptr;
+  const char* userKey = nullptr;
   esp_timer_handle_t sendSubtitlesTimer;
   SemaphoreHandle_t isPlayingMutex;  // Mutex for protecting access
   SemaphoreHandle_t sendTcpMutex;  // Mutex for protecting TCP send access
   SemaphoreHandle_t maxClientsMutex; // FreeRTOS mutex for maxClients
+  mbedtls_ssl_context ssl;
+  mbedtls_ssl_config conf;
+  mbedtls_x509_crt srvcert;
+  mbedtls_pk_context pkey;
+  mbedtls_entropy_context entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
 
   void closeSockets();  // Defined in ESP32-RTSPServer.cpp
   
-  void sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock);  // Defined in network.cpp
+  void sendTcpPacket(const uint8_t* packet, size_t packetSize, int sock, mbedtls_ssl_context* ssl);  // Defined in network.cpp
 
   void checkAndSetupUDP(int& rtpSocket, bool isMulticast, uint16_t rtpPort, IPAddress rtpIp = IPAddress());  // Defined in network.cpp
 
-  void sendRtpSubtitles(const char* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpSubtitles(const char* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast, uint32_t sessionID);  // Defined in rtp.cpp
 
-  void sendRtpAudio(const int16_t* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpAudio(const int16_t* data, size_t len, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast, uint32_t sessionID);  // Defined in rtp.cpp
 
-  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast);  // Defined in rtp.cpp
+  void sendRtpFrame(const uint8_t* data, size_t len, uint8_t quality, uint16_t width, uint16_t height, int sock, uint16_t sendRtpPort, bool useTCP, bool isMulticast, uint32_t sessionID);  // Defined in rtp.cpp
 
   static void rtpVideoTaskWrapper(void* pvParameters);  // Defined in rtp.cpp
 
@@ -186,7 +205,7 @@ private:
 
   void handleOptions(char* request, RTSP_Session& session);  // Defined in rtsp_requests.cpp
 
-  void handleDescribe(const RTSP_Session& session);  // Defined in rtsp_requests.cpp
+  void handleDescribe(RTSP_Session& session);  // Defined in rtsp_requests.cpp
 
   void handleSetup(char* request, RTSP_Session& session);  // Defined in rtsp_requests.cpp
 
@@ -209,6 +228,14 @@ private:
   static const char* LOG_TAG;  // Define a log tag for the class
 
   void sendUnauthorizedResponse(RTSP_Session& session); // Add method to send 401 Unauthorized response
-};
+  
+  bool acceptSecureClient(mbedtls_net_context& client_fd, mbedtls_ssl_context& ssl);
 
+  bool acceptNonSecureClient(int& client_sock);
+
+  void createSession(int client_sock, mbedtls_net_context& client_fd, mbedtls_ssl_context& ssl, bool useSecure);
+
+  void sendErrorResponse(bool useSecure, mbedtls_net_context& client_fd, int client_sock);
+
+};
 #endif // ESP32_RTSP_SERVER_H
