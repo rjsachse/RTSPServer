@@ -80,7 +80,7 @@ public:
 
   bool readyToSendSubtitles() const;  // Defined in utils.cpp
 
-  void setCredentials(const char* username, const char* password); // Add method to set credentials
+  bool setCredentials(const char* username, const char* password); // Add method to set credentials
 
   uint32_t rtpFps;
   TransportType transport;

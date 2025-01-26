@@ -152,7 +152,7 @@ const char* RTSPServer::dateHeader() {
   return buffer;
 }
 
-void RTSPServer::setCredentials(const char* username, const char* password) {
+bool RTSPServer::setCredentials(const char* username, const char* password) {
   if (username && password && strlen(username) > 0 && strlen(password) > 0) {
     char credentials[128];
     snprintf(credentials, sizeof(credentials), "%s:%s", username, password);
@@ -165,8 +165,10 @@ void RTSPServer::setCredentials(const char* username, const char* password) {
 
     authEnabled = true;
     RTSP_LOGI(LOG_TAG, "Authentication enabled with provided credentials.");
+    return true; // Indicate success
   } else {
     authEnabled = false;
     RTSP_LOGI(LOG_TAG, "Authentication disabled.");
+    return false; // Indicate failure
   }
 }
