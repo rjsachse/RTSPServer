@@ -18,7 +18,7 @@ void RTSPServer::rtpVideoTask() {
             multicastSent = true;
           }
         } else {
-          this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight, session.sock, session.cVideoPort, session.isTCP, false);
+          this->sendRtpFrame(this->rtspStreamBuffer, this->rtspStreamBufferSize, this->vQuality, this->vWidth, this->vHeight,  session.isHttp ? session.httpSock : session.sock, session.cVideoPort, session.isTCP, false);
         }
       }
     }
@@ -66,7 +66,7 @@ void RTSPServer::sendRTSPFrame(const uint8_t* data, size_t len, int quality, int
           multicastSent = true; 
         }
       } else {
-        sendRtpFrame(data, len, quality, width, height, session.sock, session.cVideoPort, session.isTCP, false);
+        sendRtpFrame(data, len, quality, width, height,  session.isHttp ? session.httpSock : session.sock, session.cVideoPort, session.isTCP, false);
       }
     }
   }
@@ -87,7 +87,7 @@ void RTSPServer::sendRTSPAudio(int16_t* data, size_t len) {
           multicastSent = true;
         }
       } else {
-        this->sendRtpAudio(data, len, session.sock, session.cAudioPort, session.isTCP, false);
+        this->sendRtpAudio(data, len,  session.isHttp ? session.httpSock : session.sock, session.cAudioPort, session.isTCP, false);
       }
     }
   }
@@ -106,7 +106,7 @@ void RTSPServer::sendRTSPSubtitles(char* data, size_t len) {
             multicastSent = true;
         }
       } else {
-        this->sendRtpSubtitles(data, len, session.sock, session.cSrtPort, session.isTCP, false);
+        this->sendRtpSubtitles(data, len,  session.isHttp ? session.httpSock : session.sock, session.cSrtPort, session.isTCP, false);
       }
     }
   }

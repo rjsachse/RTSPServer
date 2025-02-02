@@ -1,11 +1,24 @@
 #include "ESP32-RTSPServer.h"
 
+void RTSPServer::wrapInHTTP(char* buffer, size_t len, char* response, size_t maxLen) {
+    snprintf(response, maxLen,
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: application/x-rtsp-tunnelled\r\n"
+             "Content-Length: %d\r\n"
+             "Pragma: no-cache\r\n"
+             "Cache-Control: no-cache\r\n"
+             "\r\n"
+             "%s",
+             len, buffer);
+}
+
 /**
  * @brief Handles the OPTIONS RTSP request.
  * 
  * @param request The RTSP request.
  * @param session The RTSP session.
  */
+
 void RTSPServer::handleOptions(char* request, RTSP_Session& session) {
   char* urlStart = strstr(request, "rtsp://");
   if (urlStart) {
@@ -16,15 +29,26 @@ void RTSPServer::handleOptions(char* request, RTSP_Session& session) {
       // Path can be processed here if needed
     }
   }
+  
   char response[512];
+  const char* publicMethods = "Public: OPTIONS, DESCRIBE, SETUP, PLAY, PAUSE, TEARDOWN\r\n\r\n";
+  
   snprintf(response, sizeof(response), 
            "RTSP/1.0 200 OK\r\n"
            "CSeq: %d\r\n"
            "%s\r\n"
-           "Public: DESCRIBE, SETUP, PLAY, PAUSE, TEARDOWN\r\n\r\n", 
+           "%s",
            session.cseq, 
-           dateHeader());
-  write(session.sock, response, strlen(response));
+           dateHeader(), 
+           publicMethods);
+  
+  if (session.isHttp) {
+    char httpResponse[1024];
+    wrapInHTTP(response, strlen(response), httpResponse, sizeof(httpResponse));
+    write(session.httpSock, httpResponse, strlen(httpResponse));
+  } else {
+    write(session.sock, response, strlen(response));
+  }
 }
 
 /**
@@ -75,7 +99,8 @@ void RTSPServer::handleDescribe(const RTSP_Session& session) {
                              "RTSP/1.0 200 OK\r\nCSeq: %d\r\n%s\r\nContent-Base: rtsp://%s:554/\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n"
                              "%s",
                              session.cseq, dateHeader(), WiFi.localIP().toString().c_str(), sdpLen, sdpDescription);
-  write(session.sock, response, responseLen);
+  
+  write(session.isHttp ? session.httpSock : session.sock, response, responseLen);
 }
 
 /**
@@ -95,8 +120,13 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
     firstClientIsMulticast = session.isMulticast;
     firstClientIsTCP = session.isTCP;
 
-    // Set max clients based on the first client's connection type
-    setMaxClients(firstClientIsMulticast ? this->maxRTSPClients : 1);
+    // Set max clients based on the first client's connection type, accounting for HTTP tunneling
+    if (session.isHttp) {
+        // Keep current max clients since it was already increased for HTTP tunneling
+        RTSP_LOGD(LOG_TAG, "Keeping current max clients for HTTP tunneling");
+    } else {
+        setMaxClients(firstClientIsMulticast ? this->maxRTSPClients : 1);
+    }
   } else {
     // Determine if the connection should be rejected
     bool rejectConnection = (firstClientIsMulticast && !session.isMulticast) ||
@@ -235,7 +265,8 @@ void RTSPServer::handleSetup(char* request, RTSP_Session& session) {
              session.cseq, dateHeader(), clientPort, clientPort + 1, serverPort, serverPort + 1, session.sessionID);
   }
 
-  write(session.sock, response, strlen(response));
+  write(session.isHttp ? session.httpSock : session.sock, response, strlen(response));
+  
   free(response);
   this->sessions[session.sessionID] = session;
 }
@@ -262,7 +293,7 @@ void RTSPServer::handlePlay(RTSP_Session& session) {
            dateHeader(),
            session.sessionID);
 
-  write(session.sock, response, strlen(response));
+  write(session.isHttp ? session.httpSock : session.sock, response, strlen(response));
 }
 
 /**
@@ -278,7 +309,8 @@ void RTSPServer::handlePause(RTSP_Session& session) {
   int len = snprintf(response, sizeof(response),
                      "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                      session.cseq, session.sessionID);
-  write(session.sock, response, len);
+  
+  write(session.isHttp ? session.httpSock : session.sock, response, len);
   RTSP_LOGD(LOG_TAG, "Session %u is now paused.", session.sessionID);
 }
 
@@ -296,7 +328,8 @@ void RTSPServer::handleTeardown(RTSP_Session& session) {
   int len = snprintf(response, sizeof(response),
                      "RTSP/1.0 200 OK\r\nCSeq: %d\r\nSession: %lu\r\n\r\n",
                      session.cseq, session.sessionID);
-  write(session.sock, response, len);
+  
+  write(session.isHttp ? session.httpSock : session.sock, response, len);
 
   RTSP_LOGD(LOG_TAG, "RTSP Session %u has been torn down.", session.sessionID);
 }
@@ -333,13 +366,23 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
 
   if (totalLen <= 0) {
     int err = errno;
-    free(buffer); // Free allocated memory
+    free(buffer);
     if (err == EWOULDBLOCK || err == EAGAIN) {
       return true;
     } else if (err == ECONNRESET || err == ENOTCONN) {
-      // Handle teardown when connection is reset or not connected based on client IP
-      RTSP_LOGD(LOG_TAG, "HandleTeardown");
+      RTSP_LOGD(LOG_TAG, "Connection reset/closed - HandleTeardown");
+      // Handle teardown for current session
       this->handleTeardown(session);
+      // If this is an HTTP session, find and teardown both GET and POST sessions
+      if (session.isHttp && session.sessionCookie[0] != '\0') {
+          // Find the paired session
+          RTSP_Session* pairedSession = findSessionByCookie(session.sessionCookie);
+          if (pairedSession && pairedSession != &session) {
+              RTSP_LOGD(LOG_TAG, "Found paired HTTP session, handling teardown");
+              this->handleTeardown(*pairedSession);
+          }
+      }
+      
       return false;
     } else {
       RTSP_LOGE(LOG_TAG, "Error reading from socket, error: %d", err);
@@ -366,9 +409,35 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
     return true;
   }
 
+  // Check if the request is base64 encoded FIRST
+  RTSP_LOGD(LOG_TAG, "Checking if base64 encoded");
+  
+  if (isBase64Encoded(buffer, totalLen)) {
+    RTSP_LOGD(LOG_TAG, "Buffer is base64 encoded, decoding...");
+    char* decodedBuffer = (char*)malloc(RTSP_BUFFER_SIZE);
+    if (!decodedBuffer) {
+      RTSP_LOGE(LOG_TAG, "Failed to allocate memory for decoded buffer");
+      free(buffer);
+      return false;
+    }
+
+    size_t decodedLen;
+    if (decodeBase64(buffer, totalLen, decodedBuffer, &decodedLen)) {
+      RTSP_LOGD(LOG_TAG, "Decoded buffer: %s", decodedBuffer);
+      free(buffer);
+      buffer = decodedBuffer;
+      totalLen = decodedLen;
+    } else {
+      RTSP_LOGE(LOG_TAG, "Failed to decode base64 buffer");
+      free(decodedBuffer);
+      free(buffer);
+      return false;
+    }
+  }
+
   int cseq = captureCSeq(buffer);
   if (cseq == -1) {
-    RTSP_LOGE(LOG_TAG, "CSeq not found in request");
+    RTSP_LOGE(LOG_TAG, "CSeq not found in request: %s", buffer);
     write(session.sock, "RTSP/1.0 400 Bad Request\r\n\r\n", 29);
     free(buffer); // Free allocated memory
     return true;
@@ -410,32 +479,59 @@ bool RTSPServer::handleRTSPRequest(RTSP_Session& session) {
     }
   }
 
-  // Handle different RTSP methods
-  if (strncmp(buffer, "OPTIONS", 7) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandleOptions");
-    this->handleOptions(buffer, session);
-  } else if (strncmp(buffer, "DESCRIBE", 8) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandleDescribe");
-    this->handleDescribe(session);
-  } else if (strncmp(buffer, "SETUP", 5) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandleSetup");
-    this->handleSetup(buffer, session);
-  } else if (strncmp(buffer, "PLAY", 4) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandlePlay");
-    this->handlePlay(session);
-  } else if (strncmp(buffer, "TEARDOWN", 8) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandleTeardown");
-    this->handleTeardown(session);
-    free(buffer); // Free allocated memory
-    return false;
-  } else if (strncmp(buffer, "PAUSE", 5) == 0) {
-    RTSP_LOGD(LOG_TAG, "HandlePause");
-    this->handlePause(session);
+  // Handle HTTP tunneling methods first
+  if (strncmp(buffer, "GET / HTTP/", 10) == 0 && strstr(buffer, "Accept: application/x-rtsp-tunnelled")) {
+    RTSP_LOGD(LOG_TAG, "Handle GET HTTP Request: %s", buffer);
+    
+    // Increase max clients by 1 to account for HTTP tunneling
+    uint8_t currentMaxClients = getMaxClients();
+    setMaxClients(currentMaxClients + 1);
+    RTSP_LOGD(LOG_TAG, "Increased max clients to %d for HTTP tunneling", currentMaxClients + 1);
+    
+    session.isHttp = true;
+    char sessionCookie[MAX_COOKIE_LENGTH];
+    extractSessionCookie(buffer, sessionCookie, sizeof(sessionCookie));
+    strncpy(session.sessionCookie, sessionCookie, MAX_COOKIE_LENGTH - 1);
+    session.sessionCookie[MAX_COOKIE_LENGTH - 1] = '\0';
+
+    char response[512];
+    snprintf(response, sizeof(response),
+             "HTTP/1.1 200 OK\r\n"  // Use HTTP/1.1 for better compatibility
+             "Server: ESP32\r\n"
+             "Connection: keep-alive\r\n"
+             "%s"
+             "Cache-Control: no-store\r\n"
+             "Pragma: no-cache\r\n"
+             "Content-Type: application/x-rtsp-tunnelled\r\n"
+             "\r\n",
+             dateHeader());
+    write(session.sock, response, strlen(response));  // Use direct socket for initial HTTP response
+  }
+  else if (strncmp(buffer, "POST / HTTP/", 11) == 0 && strstr(buffer, "Content-Type: application/x-rtsp-tunnelled")) {
+    RTSP_LOGD(LOG_TAG, "RTSP-over-HTTP Tunnel Established");
+    RTSP_LOGD(LOG_TAG, "Handle POST HTTP Request: %s", buffer);
+    
+    // Extract cookie from POST request
+    char sessionCookie[MAX_COOKIE_LENGTH];
+    extractSessionCookie(buffer, sessionCookie, sizeof(sessionCookie));
+    
+    // Find corresponding GET session
+    RTSP_Session* getSession = findSessionByCookie(sessionCookie);
+    if (getSession) {
+        // Keep POST session but use GET session's socket for responses
+        session.httpSock = getSession->sock;
+        session.isHttp = true;
+        strncpy(session.sessionCookie, sessionCookie, MAX_COOKIE_LENGTH - 1);
+        session.sessionCookie[MAX_COOKIE_LENGTH - 1] = '\0';
+    } else {
+        RTSP_LOGE(LOG_TAG, "No matching GET session found for cookie: %s", sessionCookie);
+    }
   } else {
-    RTSP_LOGW(LOG_TAG, "Unknown RTSP method: %s", buffer);
+    // Handle regular RTSP commands
+    handleRTSPCommand(buffer, session);
   }
 
-  free(buffer); // Free allocated memory
+  free(buffer);
   return true;
 }
 
@@ -446,6 +542,80 @@ void RTSPServer::sendUnauthorizedResponse(RTSP_Session& session) {
            "CSeq: %d\r\n"
            "WWW-Authenticate: Basic realm=\"ESP32\"\r\n\r\n",
            session.cseq);
-  write(session.sock, response, strlen(response));
+  
+  write(session.isHttp ? session.httpSock : session.sock, response, strlen(response));
   RTSP_LOGW(LOG_TAG, "Sent 401 Unauthorized response to client.");
+}
+
+void RTSPServer::handleRTSPCommand(char* command, RTSP_Session& session) {
+  if (strncmp(command, "OPTIONS", 7) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Options");
+    handleOptions(command, session);
+  } else if (strncmp(command, "DESCRIBE", 8) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Describe");
+    handleDescribe(session);
+  } else if (strncmp(command, "SETUP", 5) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Setup");
+    handleSetup(command, session);
+  } else if (strncmp(command, "PLAY", 4) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Play");
+    handlePlay(session);
+  } else if (strncmp(command, "TEARDOWN", 8) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Teardown");
+    handleTeardown(session);
+  } else if (strncmp(command, "PAUSE", 5) == 0) {
+    RTSP_LOGD(LOG_TAG, "Handle RTSP Pause");
+    handlePause(session);
+  } else {
+    RTSP_LOGW(LOG_TAG, "Unknown RTSP method: %s", command);
+  }
+}
+
+bool RTSPServer::isBase64Encoded(const char* buffer, size_t length) {
+    // First check for spaces - if found, not base64
+    for (size_t i = 0; i < length; i++) {
+        if (isspace(buffer[i])) {
+            return false;
+        }
+    }
+
+    // Now check if it's valid base64
+    if (length % 4 != 0) {
+        return false;
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        if (!isalnum(buffer[i]) && 
+            buffer[i] != '+' && 
+            buffer[i] != '/' && 
+            buffer[i] != '=') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void RTSPServer::extractSessionCookie(const char* buffer, char* sessionCookie, size_t maxLen) {
+    const char* cookieHeader = strstr(buffer, "x-sessioncookie:");
+    if (cookieHeader) {
+        cookieHeader += strlen("x-sessioncookie:");
+        while (*cookieHeader == ' ') cookieHeader++;
+        const char* end = strstr(cookieHeader, "\r\n");
+        size_t len = end ? (size_t)(end - cookieHeader) : strlen(cookieHeader);
+        len = len < maxLen ? len : maxLen - 1;
+        strncpy(sessionCookie, cookieHeader, len);
+        sessionCookie[len] = '\0';
+    } else {
+        sessionCookie[0] = '\0';
+    }
+}
+
+RTSP_Session* RTSPServer::findSessionByCookie(const char* cookie) {
+    for (auto& pair : sessions) {
+        if (strcmp(pair.second.sessionCookie, cookie) == 0) {
+            return &pair.second;
+        }
+    }
+    return nullptr;
 }

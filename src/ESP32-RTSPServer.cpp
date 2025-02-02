@@ -303,15 +303,18 @@ void RTSPServer::rtspTask() {
 
       // Create a new session for the new client
       RTSP_Session session = {
-        esp_random(),
-        client_sock,
-        0,
-        0,
-        0,
-        0,
-        false,
-        false,
-        false
+        esp_random(),  // sessionID
+        client_sock,   // sock
+        0,            // cseq
+        0,            // cVideoPort
+        0,            // cAudioPort
+        0,            // cSrtPort
+        false,        // isMulticast
+        false,        // isPlaying
+        false,        // isTCP
+        false,        // isHttp
+        -1,           // httpSock
+        {0}           // sessionCookie (initialized as empty)
       };
       sessions[session.sessionID] = session;
 

@@ -1,6 +1,6 @@
 #include "ESP32-RTSPServer.h"
 #include "libb64/cencode.h" // Include libb64 library
-
+#include "libb64/cdecode.h" // Include libb64 library for decoding
 
 void RTSPServer::startSubtitlesTimer(esp_timer_cb_t userCallback) { 
   const esp_timer_create_args_t timerConfig = { 
@@ -171,4 +171,16 @@ bool RTSPServer::setCredentials(const char* username, const char* password) {
     RTSP_LOGI(LOG_TAG, "Authentication disabled.");
     return false; // Indicate failure
   }
+}
+
+bool RTSPServer::decodeBase64(const char* input, size_t inputLen, char* output, size_t* outputLen) {
+    base64_decodestate state;
+    base64_init_decodestate(&state);
+    int len = base64_decode_block(input, inputLen, output, &state);
+    if (len >= 0) {
+        *outputLen = len;
+        output[len] = '\0';
+        return true;
+    }
+    return false;
 }

@@ -33,6 +33,8 @@
 // User defined options in sketch
 //#define OVERRIDE_RTSP_SINGLE_CLIENT_MODE // Override the default behavior of allowing only one client for unicast or TCP
 //#define RTSP_VIDEO_NONBLOCK // Enable non-blocking video streaming by creating a separate task for video streaming, preventing it from blocking the main sketch.
+#define MAX_COOKIE_LENGTH 128 // max length of session cookie
+
 struct RTSP_Session {
   uint32_t sessionID;
   int sock;
@@ -43,7 +45,11 @@ struct RTSP_Session {
   bool isMulticast;
   bool isPlaying;
   bool isTCP;
+  bool isHttp;  // Add flag for HTTP tunneling
+  int httpSock;  // Add HTTP socket storage
+  char sessionCookie[MAX_COOKIE_LENGTH];  // Add storage for session cookie
 };
+
 class RTSPServer {
 public:
   enum TransportType {
@@ -209,6 +215,12 @@ private:
   static const char* LOG_TAG;  // Define a log tag for the class
 
   void sendUnauthorizedResponse(RTSP_Session& session); // Add method to send 401 Unauthorized response
+  void extractSessionCookie(const char* buffer, char* sessionCookie, size_t maxLen);
+  bool isBase64Encoded(const char* buffer, size_t length);
+  void handleRTSPCommand(char* command, RTSP_Session& session);
+  bool decodeBase64(const char* input, size_t inputLen, char* output, size_t* outputLen);
+  void wrapInHTTP(char* buffer, size_t len, char* response, size_t maxLen);  // Add this line
+  RTSP_Session* findSessionByCookie(const char* cookie);  // Add this line
 };
 
 #endif // ESP32_RTSP_SERVER_H
